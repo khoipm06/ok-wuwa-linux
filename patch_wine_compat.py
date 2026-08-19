@@ -8,6 +8,7 @@ or Wine prefix.
 Fixes Applied:
 1. PySide6 / Qt6Core DLL load error (copies/aliases icu.dll as icuuc.dll & icuin.dll).
 2. Blank / black titlebar and sidebar caused by Windows 11 DWM Mica/Acrylic backdrop transparency.
+3. Invisible mouse cursor caused by DwmExtendFrameIntoClientArea (-1) full-window glass extension.
 """
 
 import os
@@ -86,9 +87,12 @@ def patch_frameless_window(site_packages: str):
                 "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled():\n            return",
                 "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled() or is_wine():\n            return"
             )
+            content = primary_wine = (
+                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11() or is_wine():"
+            )
             content = content.replace(
                 "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11():",
-                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11() or is_wine():"
+                primary_wine
             )
             content = content.replace(
                 "    def enableBlurBehindWindow(self, hWnd):\n        blurBehind = DWM_BLURBEHIND(1, True, 0, False)",
@@ -97,6 +101,21 @@ def patch_frameless_window(site_packages: str):
             with open(we_path, "w", encoding="utf-8") as f:
                 f.write(content)
             print("  -> Patched window_effect.py")
+
+    # 3. windows/__init__.py
+    init_path = os.path.join(site_packages, "qframelesswindow", "windows", "__init__.py")
+    if os.path.isfile(init_path):
+        with open(init_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if "self.setCursor(Qt.ArrowCursor)" not in content:
+            content = content.replace(
+                "        self.resize(500, 500)\n        self.titleBar.raise_()",
+                "        self.resize(500, 500)\n        self.titleBar.raise_()\n        self.setCursor(Qt.ArrowCursor)\n        self.setMouseTracking(True)"
+            )
+            with open(init_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("  -> Patched windows/__init__.py")
 
 
 def main():
