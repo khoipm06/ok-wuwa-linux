@@ -19,7 +19,7 @@ from pathlib import Path
 
 def fix_icu_dlls(prefix_path: str):
     """Ensure icuuc.dll and icuin.dll exist as copies of icu.dll in Wine system directories."""
-    print("[1/3] Checking ICU DLL aliases in Wine prefix...")
+    print("[1/4] Checking ICU DLL aliases in Wine prefix...")
     drive_c = os.path.join(prefix_path, "drive_c", "windows")
     for subdir in ["system32", "syswow64"]:
         dir_path = os.path.join(drive_c, subdir)
@@ -39,7 +39,7 @@ def fix_icu_dlls(prefix_path: str):
 
 def patch_frameless_window(site_packages: str):
     """Patch qframelesswindow to disable DWM composition & full-window frame extension on Wine."""
-    print("[2/3] Patching qframelesswindow for Wine compatibility...")
+    print("[2/4] Patching qframelesswindow for Wine compatibility...")
 
     # 1. win32_utils.py
     wu_path = os.path.join(site_packages, "qframelesswindow", "utils", "win32_utils.py")
@@ -87,12 +87,9 @@ def patch_frameless_window(site_packages: str):
                 "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled():\n            return",
                 "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled() or is_wine():\n            return"
             )
-            content = primary_wine = (
-                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11() or is_wine():"
-            )
             content = content.replace(
                 "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11():",
-                primary_wine
+                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11() or is_wine():"
             )
             content = content.replace(
                 "    def enableBlurBehindWindow(self, hWnd):\n        blurBehind = DWM_BLURBEHIND(1, True, 0, False)",
@@ -116,6 +113,69 @@ def patch_frameless_window(site_packages: str):
             with open(init_path, "w", encoding="utf-8") as f:
                 f.write(content)
             print("  -> Patched windows/__init__.py")
+
+
+def patch_fluent_widgets(site_packages: str):
+    """Patch qfluentwidgets to disable transparent backdrop on Wine and fix black titlebar/sidebar."""
+    print("[3/4] Patching qfluentwidgets for Wine compatibility...")
+
+    # 1. fluent_window.py
+    fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py")
+    if os.path.isfile(fw_path):
+        with open(fw_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if "def is_wine():" not in content:
+            wine_func = (
+                "def is_wine():\n"
+                "    try:\n"
+                "        import ctypes\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+            )
+            content = wine_func + content
+
+        content = content.replace(
+            "        # enable mica effect on win11\n        self.setMicaEffectEnabled(True)",
+            "        # enable mica effect on win11 (unless on Wine)\n        if not is_wine():\n            self.setMicaEffectEnabled(True)\n        else:\n            self._isMicaEnabled = False\n            self.setBackgroundColor(self._normalBackgroundColor())"
+        )
+
+        content = content.replace(
+            "        if sys.platform != 'win32' or sys.getwindowsversion().build < 22000:\n            return",
+            "        if sys.platform != 'win32' or sys.getwindowsversion().build < 22000 or is_wine():\n            self._isMicaEnabled = False\n            self.setBackgroundColor(self._normalBackgroundColor())\n            return"
+        )
+
+        with open(fw_path, "w", encoding="utf-8") as f:
+            f.write(content)
+        print("  -> Patched fluent_window.py")
+
+    # 2. widgets/frameless_window.py
+    flw_path = os.path.join(site_packages, "qfluentwidgets", "components", "widgets", "frameless_window.py")
+    if os.path.isfile(flw_path):
+        with open(flw_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        if "is_wine()" not in content:
+            wine_header = (
+                "import sys\n\n"
+                "def is_wine():\n"
+                "    try:\n"
+                "        import ctypes\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+                "if sys.platform != \"win32\" or sys.getwindowsversion().build < 22000 or is_wine():\n"
+                "    from qframelesswindow import FramelessWindow\n"
+                "else:"
+            )
+            content = content.replace(
+                "import sys\n\nif sys.platform != \"win32\" or sys.getwindowsversion().build < 22000:\n    from qframelesswindow import FramelessWindow\nelse:",
+                wine_header
+            )
+            with open(flw_path, "w", encoding="utf-8") as f:
+                f.write(content)
+            print("  -> Patched widgets/frameless_window.py")
 
 
 def main():
@@ -160,10 +220,11 @@ def main():
     if site_packages:
         print(f"Found Python site-packages: {site_packages}")
         patch_frameless_window(site_packages)
+        patch_fluent_widgets(site_packages)
     else:
         print("Warning: Embedded Python site-packages directory not found yet.")
 
-    print("\n[3/3] All Wine/Proton compatibility patches successfully applied!")
+    print("\n[4/4] All Wine/Proton compatibility patches successfully applied!")
 
 
 if __name__ == "__main__":
