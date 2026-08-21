@@ -9,6 +9,7 @@ Fixes Applied:
 1. PySide6 / Qt6Core DLL load error (copies/aliases icu.dll as icuuc.dll & icuin.dll).
 2. Blank / black titlebar and sidebar caused by Windows 11 DWM Mica/Acrylic backdrop transparency.
 3. Invisible mouse cursor caused by DwmExtendFrameIntoClientArea (-1) full-window glass extension.
+4. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
 """
 
 import os
@@ -19,7 +20,7 @@ from pathlib import Path
 
 def fix_icu_dlls(prefix_path: str):
     """Ensure icuuc.dll and icuin.dll exist as copies of icu.dll in Wine system directories."""
-    print("[1/4] Checking ICU DLL aliases in Wine prefix...")
+    print("[1/5] Checking ICU DLL aliases in Wine prefix...")
     drive_c = os.path.join(prefix_path, "drive_c", "windows")
     for subdir in ["system32", "syswow64"]:
         dir_path = os.path.join(drive_c, subdir)
@@ -39,7 +40,7 @@ def fix_icu_dlls(prefix_path: str):
 
 def patch_frameless_window(site_packages: str):
     """Patch qframelesswindow to disable DWM composition & full-window frame extension on Wine."""
-    print("[2/4] Patching qframelesswindow for Wine compatibility...")
+    print("[2/5] Patching qframelesswindow for Wine compatibility...")
 
     # 1. win32_utils.py
     wu_path = os.path.join(site_packages, "qframelesswindow", "utils", "win32_utils.py")
@@ -117,7 +118,7 @@ def patch_frameless_window(site_packages: str):
 
 def patch_fluent_widgets(site_packages: str):
     """Patch qfluentwidgets to disable transparent backdrop on Wine and fix black titlebar/sidebar."""
-    print("[3/4] Patching qfluentwidgets for Wine compatibility...")
+    print("[3/5] Patching qfluentwidgets for Wine compatibility...")
 
     # 1. fluent_window.py
     fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py")
@@ -178,6 +179,39 @@ def patch_fluent_widgets(site_packages: str):
             print("  -> Patched widgets/frameless_window.py")
 
 
+def patch_app_code(working_dir: str):
+    """Patch application code inside working directory."""
+    print("[4/5] Patching application modules (config.py)...")
+
+    # config.py
+    c_path = os.path.join(working_dir, "config.py")
+    if os.path.isfile(c_path):
+        with open(c_path, "r", encoding="utf-8") as f:
+            c_content = f.read()
+        if "steam://rungameid/3513350" not in c_content:
+            old_calc = (
+                "def calculate_pc_exe_path(running_path):\n"
+                "    if running_path is None:\n"
+                "        return _find_most_recently_run_pc_exe() or _find_pc_exe_from_registry()\n"
+                "    game_exe_folder = Path(running_path).parents[3]\n"
+                "    return str(game_exe_folder / \"Wuthering Waves.exe\")"
+            )
+            new_calc = (
+                "def calculate_pc_exe_path(running_path):\n"
+                "    if running_path is None:\n"
+                "        standalone = _find_most_recently_run_pc_exe() or _find_pc_exe_from_registry()\n"
+                "        if standalone:\n"
+                "            return standalone\n"
+                "        return \"steam://rungameid/3513350\"\n"
+                "    game_exe_folder = Path(running_path).parents[3]\n"
+                "    return str(game_exe_folder / \"Wuthering Waves.exe\")"
+            )
+            c_content = c_content.replace(old_calc, new_calc)
+            with open(c_path, "w", encoding="utf-8") as f:
+                f.write(c_content)
+            print("  -> Patched config.py")
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: patch_wine_compat.py <path_to_compatdata_pfx_or_ok_ww_dir>")
@@ -206,16 +240,20 @@ def main():
     print(f"Found Wine Prefix: {pfx_path}")
     fix_icu_dlls(pfx_path)
 
-    # Locate site-packages in users/
+    # Locate site-packages and working directory dynamically in users/
     users_dir = os.path.join(pfx_path, "drive_c", "users")
     site_packages = None
+    working_dir = None
 
     if os.path.isdir(users_dir):
         for user_entry in os.listdir(users_dir):
             app_dir = os.path.join(users_dir, user_entry, "AppData", "Local", "ok-ww", "data", "apps", "ok-ww")
             sp = os.path.join(app_dir, "python", "Lib", "site-packages")
+            wk = os.path.join(app_dir, "working")
             if os.path.isdir(sp):
                 site_packages = sp
+            if os.path.isdir(wk):
+                working_dir = wk
 
     if site_packages:
         print(f"Found Python site-packages: {site_packages}")
@@ -224,7 +262,11 @@ def main():
     else:
         print("Warning: Embedded Python site-packages directory not found yet.")
 
-    print("\n[4/4] All Wine/Proton compatibility patches successfully applied!")
+    if working_dir:
+        print(f"Found working directory: {working_dir}")
+        patch_app_code(working_dir)
+
+    print("\n[5/5] All Wine/Proton compatibility patches successfully applied!")
 
 
 if __name__ == "__main__":
