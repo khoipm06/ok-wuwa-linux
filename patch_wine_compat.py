@@ -10,8 +10,9 @@ Fixes Applied:
 2. Blank / black titlebar and sidebar caused by Windows 11 DWM Mica/Acrylic backdrop transparency.
 3. Invisible mouse cursor caused by DwmExtendFrameIntoClientArea (-1) full-window glass extension.
 4. Clean fallback for Windows Graphics Capture (WGC / WinRT) to prevent HRESULT 0x80040154 error logs.
-5. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
-6. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
+5. Translation fallback (fallback=True) to eliminate "install translations error for en_US" log spam.
+6. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
+7. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
 """
 
 import os
@@ -183,16 +184,13 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (window.py, config.py)...")
+    print("[4/5] Patching application modules (window.py, translation.py, config.py)...")
 
     # 1. window.py
     w_path = os.path.join(working_dir, "ok", "util", "window.py")
     if os.path.isfile(w_path):
         with open(w_path, "r", encoding="utf-8") as f:
             w_content = f.read()
-
-        if "def is_wine():" not in content if 'content' in dir() else True:
-            pass
 
         if "def is_wine():" not in w_content:
             wine_func = (
@@ -261,7 +259,24 @@ def patch_app_code(working_dir: str):
             f.write(w_content)
         print("  -> Patched ok/util/window.py")
 
-    # 2. config.py
+    # 2. translation.py
+    t_path = os.path.join(working_dir, "ok", "core", "translation.py")
+    if os.path.isfile(t_path):
+        with open(t_path, "r", encoding="utf-8") as f:
+            t_content = f.read()
+        t_content = t_content.replace(
+            "return gettext.translation('ok', dir_i18n, languages=fallback_list)",
+            "return gettext.translation('ok', dir_i18n, languages=fallback_list, fallback=True)"
+        )
+        t_content = t_content.replace(
+            "return gettext.translation('ocr', dir_i18n, languages=fallback_list)",
+            "return gettext.translation('ocr', dir_i18n, languages=fallback_list, fallback=True)"
+        )
+        with open(t_path, "w", encoding="utf-8") as f:
+            f.write(t_content)
+        print("  -> Patched ok/core/translation.py")
+
+    # 3. config.py
     c_path = os.path.join(working_dir, "config.py")
     if os.path.isfile(c_path):
         with open(c_path, "r", encoding="utf-8") as f:
