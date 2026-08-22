@@ -9,7 +9,9 @@ Fixes Applied:
 1. PySide6 / Qt6Core DLL load error (copies/aliases icu.dll as icuuc.dll & icuin.dll).
 2. Blank / black titlebar and sidebar caused by Windows 11 DWM Mica/Acrylic backdrop transparency.
 3. Invisible mouse cursor caused by DwmExtendFrameIntoClientArea (-1) full-window glass extension.
-4. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
+4. Clean fallback for Windows Graphics Capture (WGC / WinRT) to prevent HRESULT 0x80040154 error logs.
+5. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
+6. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
 """
 
 import os
@@ -181,9 +183,85 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (config.py)...")
+    print("[4/5] Patching application modules (window.py, config.py)...")
 
-    # config.py
+    # 1. window.py
+    w_path = os.path.join(working_dir, "ok", "util", "window.py")
+    if os.path.isfile(w_path):
+        with open(w_path, "r", encoding="utf-8") as f:
+            w_content = f.read()
+
+        if "def is_wine():" not in content if 'content' in dir() else True:
+            pass
+
+        if "def is_wine():" not in w_content:
+            wine_func = (
+                "def is_wine():\n"
+                "    try:\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+            )
+            w_content = w_content.replace(
+                "def windows_graphics_available():",
+                wine_func + "def windows_graphics_available():\n    if is_wine():\n        return False"
+            )
+
+        if "Try Win32 Process Module Query first" not in w_content:
+            old_get_exe = (
+                "def get_exe_by_hwnd(hwnd):\n"
+                "    try:\n"
+                "        if not win32gui.IsWindow(hwnd):\n"
+                "            return \"\", \"\", \"\"\n"
+                "        _, pid = win32process.GetWindowThreadProcessId(hwnd)\n"
+                "        if pid <= 0:\n"
+                "            return \"\", \"\", \"\""
+            )
+            new_get_exe = (
+                "def get_exe_by_hwnd(hwnd):\n"
+                "    try:\n"
+                "        if not win32gui.IsWindow(hwnd):\n"
+                "            return \"\", \"\", \"\"\n"
+                "        _, pid = win32process.GetWindowThreadProcessId(hwnd)\n"
+                "        if pid <= 0:\n"
+                "            return \"\", \"\", \"\"\n\n"
+                "        # Try Win32 Process Module Query first for 100% reliable Wine compatibility\n"
+                "        try:\n"
+                "            h_proc = win32api.OpenProcess(win32con.PROCESS_QUERY_LIMITED_INFORMATION | win32con.PROCESS_VM_READ, False, pid)\n"
+                "            if h_proc:\n"
+                "                try:\n"
+                "                    exe_path = win32process.GetModuleFileNameEx(h_proc, 0)\n"
+                "                    if exe_path:\n"
+                "                        win32api.CloseHandle(h_proc)\n"
+                "                        return os.path.basename(exe_path), exe_path, \"\"\n"
+                "                except Exception:\n"
+                "                    pass\n"
+                "                win32api.CloseHandle(h_proc)\n"
+                "        except Exception:\n"
+                "            pass"
+            )
+            w_content = w_content.replace(old_get_exe, new_get_exe)
+
+        if "matched_exe" not in w_content:
+            old_check = (
+                "        if exe_names:\n"
+                "            if not name or not any((compare_path_safe(name, exe_name) or compare_path_safe(exe_name, full_path)) for exe_name in exe_names):\n"
+                "                return True"
+            )
+            new_check = (
+                "        if exe_names:\n"
+                "            matched_exe = name and any((compare_path_safe(name, exe_name) or compare_path_safe(exe_name, full_path)) for exe_name in exe_names)\n"
+                "            if not matched_exe:\n"
+                "                if not (is_wine() and is_main_class and class_name is not None):\n"
+                "                    return True"
+            )
+            w_content = w_content.replace(old_check, new_check)
+
+        with open(w_path, "w", encoding="utf-8") as f:
+            f.write(w_content)
+        print("  -> Patched ok/util/window.py")
+
+    # 2. config.py
     c_path = os.path.join(working_dir, "config.py")
     if os.path.isfile(c_path):
         with open(c_path, "r", encoding="utf-8") as f:
