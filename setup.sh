@@ -9,12 +9,14 @@ echo "=========================================================="
 echo "    OK-WuWa (Wuthering Waves) Linux / Proton Auto-Setup   "
 echo "=========================================================="
 
-# 1. Locate Steam library folders
+# 1. Dynamically locate Steam library folders
 echo "[1/5] Discovering Steam library folders..."
 VDF_CANDIDATES=(
     "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
     "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
     "${HOME}/.local/share/Steam/steamapps/libraryfolders.vdf"
+    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/libraryfolders.vdf"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"
 )
 
 STEAM_LIBS=()
@@ -40,6 +42,7 @@ fi
 if [ ${#STEAM_LIBS[@]} -eq 0 ]; then
     STEAM_LIBS=(
         "${HOME}/.local/share/Steam"
+        "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     )
 fi
 
@@ -76,6 +79,8 @@ PROTON_DIR=""
 PROTON_SEARCH_DIRS=(
     "${HOME}/.steam/root/compatibilitytools.d"
     "${HOME}/.local/share/Steam/compatibilitytools.d"
+    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
 )
 
 for lib in "${STEAM_LIBS[@]}"; do
@@ -93,6 +98,19 @@ for dir in "${PROTON_SEARCH_DIRS[@]}"; do
     fi
 done
 
+if [ -z "$PROTON_BIN" ]; then
+    for dir in "${PROTON_SEARCH_DIRS[@]}"; do
+        if [ -d "$dir" ]; then
+            cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | head -n 1 || true)
+            if [ -n "$cand" ] && [ -x "$cand" ]; then
+                PROTON_BIN="$cand"
+                PROTON_DIR="$(dirname "$cand")"
+                break
+            fi
+        fi
+    done
+fi
+
 if [ -z "$PROTON_BIN" ] || [ ! -x "$PROTON_BIN" ]; then
     echo "Error: Could not automatically detect a Proton executable."
     exit 1
@@ -101,6 +119,9 @@ echo "  -> Using Proton: ${PROTON_BIN}"
 
 # Detect primary Steam client directory
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
+if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ]; then
+    STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+fi
 
 # 4. Check if OK-WW is installed, download installer if missing
 APP_DIR=""
@@ -154,13 +175,15 @@ VDF_CANDIDATES=(
     "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
     "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
     "${HOME}/.local/share/Steam/steamapps/libraryfolders.vdf"
+    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/libraryfolders.vdf"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"
 )
 
 STEAM_LIBS=()
 for vdf in "${VDF_CANDIDATES[@]}"; do
     if [ -f "$vdf" ]; then
         while IFS= read -r line; do
-            if [[ "$line" =~ "path"[[:space:]]+"([^"]+)" ]]; then
+            if [[ "$line" =~ \"path\"[[:space:]]+\"([^\"]+)\" ]]; then
                 lib_path="${BASH_REMATCH[1]}"
                 [ -d "$lib_path" ] && STEAM_LIBS+=("$lib_path")
             fi
@@ -191,6 +214,8 @@ PROTON_DIR=""
 SEARCH_DIRS=(
     "${HOME}/.steam/root/compatibilitytools.d"
     "${HOME}/.local/share/Steam/compatibilitytools.d"
+    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d"
+    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
 )
 for lib in "${STEAM_LIBS[@]}"; do
     SEARCH_DIRS+=("${lib}/compatibilitytools.d" "${lib}/steamapps/common")
@@ -202,6 +227,15 @@ for dir in "${SEARCH_DIRS[@]}"; do
         [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; PROTON_DIR="$(dirname "$cand")"; break; }
     fi
 done
+
+if [ -z "$PROTON_BIN" ]; then
+    for dir in "${SEARCH_DIRS[@]}"; do
+        if [ -d "$dir" ]; then
+            cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | head -n 1 || true)
+            [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; PROTON_DIR="$(dirname "$cand")"; break; }
+        fi
+    done
+fi
 
 # Ensure ICU DLL aliases
 SYSTEM32="${PFX_PATH}/drive_c/windows/system32"
@@ -216,6 +250,7 @@ if [ -f "${SYSWOW64}/icu.dll" ]; then
 fi
 
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
+[ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] && STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
 
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
 export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
@@ -230,12 +265,28 @@ done
 [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
 
 WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
-PYTHON_EXE="C:\users\steamuser\AppData\Local\ok-ww\data\apps\ok-ww\python\python.exe"
+PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
 
-# Direct Proton execution
+# If umu-run is available on the system, prefer using umu-run
+if command -v umu-run >/dev/null 2>&1; then
+    export GAMEID="${APP_ID}"
+    export STORE="steam"
+    export WINEPREFIX="${PFX_PATH}"
+    [ -n "${PROTON_DIR}" ] && export PROTONPATH="${PROTON_DIR}"
+    
+    if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
+        cd "${APP_DIR}"
+        exec umu-run "C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe" "${@:2}"
+    else
+        cd "${WORKING_DIR}"
+        exec umu-run "${PYTHON_EXE}" "main.py" "$@"
+    fi
+fi
+
+# Direct Proton execution fallback
 if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
     cd "${APP_DIR}"
-    exec "${PROTON_BIN}" run "C:\users\steamuser\AppData\Local\ok-ww\ok-ww.exe" "${@:2}"
+    exec "${PROTON_BIN}" run "C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe" "${@:2}"
 else
     cd "${WORKING_DIR}"
     exec "${PROTON_BIN}" run "${PYTHON_EXE}" "main.py" "$@"
@@ -342,6 +393,8 @@ WRAPPER_EOF
 chmod +x "${WRAPPER_PATH}"
 cp "${WRAPPER_PATH}" "${COMPAT_WRAPPER}"
 chmod +x "${COMPAT_WRAPPER}"
+[ -d "${HOME}/.var/app/com.valvesoftware.Steam" ] && cp "${WRAPPER_PATH}" "${HOME}/.var/app/com.valvesoftware.Steam/ok-wuwa-steam-wrapper.sh"
+
 
 # 6c. Desktop Entry (~/.local/share/applications/ok-wuwa.desktop)
 DESKTOP_PATH="${HOME}/.local/share/applications/ok-wuwa.desktop"
