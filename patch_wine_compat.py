@@ -11,8 +11,9 @@ Fixes Applied:
 3. Invisible mouse cursor caused by DwmExtendFrameIntoClientArea (-1) full-window glass extension.
 4. Clean fallback for Windows Graphics Capture (WGC / WinRT) to prevent HRESULT 0x80040154 error logs.
 5. Translation fallback (fallback=True) to eliminate "install translations error for en_US" log spam.
-6. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
-7. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
+6. Explorer launch optimization under Wine to eliminate COM Shell.Application enumeration timeouts.
+7. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
+8. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
 """
 
 import os
@@ -184,7 +185,7 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (window.py, translation.py, config.py)...")
+    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py)...")
 
     # 1. window.py
     w_path = os.path.join(working_dir, "ok", "util", "window.py")
@@ -276,7 +277,29 @@ def patch_app_code(working_dir: str):
             f.write(t_content)
         print("  -> Patched ok/core/translation.py")
 
-    # 3. config.py
+    # 3. explorer.py
+    e_path = os.path.join(working_dir, "ok", "util", "explorer.py")
+    if os.path.isfile(e_path):
+        with open(e_path, "r", encoding="utf-8") as f:
+            e_content = f.read()
+        if "is_wine" not in e_content:
+            e_content = (
+                "def is_wine():\n"
+                "    try:\n"
+                "        import ctypes\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+            ) + e_content
+            e_content = e_content.replace(
+                "    if _focus_existing_explorer_window(folder, item_name):\n        logger.info(f'Explorer focused existing window: folder={str(folder)!r}')\n        return True",
+                "    if is_wine():\n        os.startfile(str(folder), 'explore')\n        logger.info('Explorer launch request completed (Wine)')\n        return True\n    if _focus_existing_explorer_window(folder, item_name):\n        logger.info(f'Explorer focused existing window: folder={str(folder)!r}')\n        return True"
+            )
+            with open(e_path, "w", encoding="utf-8") as f:
+                f.write(e_content)
+            print("  -> Patched ok/util/explorer.py")
+
+    # 4. config.py
     c_path = os.path.join(working_dir, "config.py")
     if os.path.isfile(c_path):
         with open(c_path, "r", encoding="utf-8") as f:
