@@ -15,6 +15,8 @@ Fixes Applied:
 7. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
 8. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
 9. BitBlt invalid window handle guard to prevent (1400, GetWindowDC) crash loops on popups.
+10. UpdateCard silence pyappify update RuntimeError when run outside standalone installer.
+11. PostMessage keypress down_time increase (0.04s) for DXVK/Proton frame tick reliability.
 """
 
 import os
@@ -186,7 +188,7 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py, bitblt_utils.py)...")
+    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py, bitblt_utils.py, UpdateCard.py, post_message.py)...")
 
     # 1. window.py
     w_path = os.path.join(working_dir, "ok", "util", "window.py")
@@ -340,6 +342,34 @@ def patch_app_code(working_dir: str):
             with open(bu_path, "w", encoding="utf-8") as f:
                 f.write(bu_content)
             print("  -> Patched ok/device/capture_methods/bitblt_utils.py")
+
+    # 6. UpdateCard.py (silence pyappify update error loop)
+    uc_path = os.path.join(working_dir, "ok", "ui", "qt", "about", "UpdateCard.py")
+    if os.path.isfile(uc_path):
+        with open(uc_path, "r", encoding="utf-8") as f:
+            uc_content = f.read()
+        if "if self._busy or not self.pyappify_app_version:" not in uc_content:
+            uc_content = uc_content.replace(
+                "    def check_for_updates(self):\n        if self._busy:\n            return",
+                "    def check_for_updates(self):\n        if self._busy or not self.pyappify_app_version:\n            return"
+            )
+            with open(uc_path, "w", encoding="utf-8") as f:
+                f.write(uc_content)
+            print("  -> Patched ok/ui/qt/about/UpdateCard.py")
+
+    # 7. post_message.py (Wine frame-tick keypress reliability)
+    pm_path = os.path.join(working_dir, "ok", "device", "interaction_methods", "post_message.py")
+    if os.path.isfile(pm_path):
+        with open(pm_path, "r", encoding="utf-8") as f:
+            pm_content = f.read()
+        if "down_time=0.04" not in pm_content:
+            pm_content = pm_content.replace(
+                "def send_key(self, key, down_time=0.01):",
+                "def send_key(self, key, down_time=0.04):"
+            )
+            with open(pm_path, "w", encoding="utf-8") as f:
+                f.write(pm_content)
+            print("  -> Patched ok/device/interaction_methods/post_message.py")
 
 
 def main():
