@@ -14,6 +14,7 @@ Fixes Applied:
 6. Explorer launch optimization under Wine to eliminate COM Shell.Application enumeration timeouts.
 7. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
 8. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
+9. BitBlt invalid window handle guard to prevent (1400, GetWindowDC) crash loops on popups.
 """
 
 import os
@@ -185,7 +186,7 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py)...")
+    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py, bitblt_utils.py)...")
 
     # 1. window.py
     w_path = os.path.join(working_dir, "ok", "util", "window.py")
@@ -326,6 +327,19 @@ def patch_app_code(working_dir: str):
             with open(c_path, "w", encoding="utf-8") as f:
                 f.write(c_content)
             print("  -> Patched config.py")
+
+    # 5. bitblt_utils.py (prevent invalid HWND crash flood)
+    bu_path = os.path.join(working_dir, "ok", "device", "capture_methods", "bitblt_utils.py")
+    if os.path.isfile(bu_path):
+        with open(bu_path, "r", encoding="utf-8") as f:
+            bu_content = f.read()
+        if "if not win32gui.IsWindow(hwnd):" not in bu_content:
+            old_cap = "def capture_by_bitblt(context, hwnd, width, height, x, y, render_full_content):\n    if hwnd <= 0 or width <= 0 or height <= 0:\n        logger.error(f'capture_by_bitblt invalid params: hwnd={hwnd}, w={width}, h={height}')\n        return None"
+            new_cap = "def capture_by_bitblt(context, hwnd, width, height, x, y, render_full_content):\n    if hwnd <= 0 or width <= 0 or height <= 0:\n        return None\n    if not win32gui.IsWindow(hwnd):\n        clean_up_bitblt(context)\n        return None"
+            bu_content = bu_content.replace(old_cap, new_cap)
+            with open(bu_path, "w", encoding="utf-8") as f:
+                f.write(bu_content)
+            print("  -> Patched ok/device/capture_methods/bitblt_utils.py")
 
 
 def main():
