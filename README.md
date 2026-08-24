@@ -12,6 +12,10 @@ A complete guide, automated setup script, and compatibility patcher for running 
   1. **Wine Process Isolation**: Steam runs Wuthering Waves inside a containerized sandbox (`pressure-vessel` / bubblewrap) with its own `wineserver` instance. If OK-WW is launched from outside the container, it connects to a separate, isolated `wineserver` instance. Win32 `FindWindow("UnrealWindow")` cannot see windows across different wineservers.
   2. **`psutil` PID Query under Wine**: `ok/util/window.py` called `psutil.Process(pid)` to check process names. Under Wine, internal Windows PIDs don't match host `/proc` PIDs, causing `psutil` to fail and `find_hwnd` to discard the game window.
   3. **Direct Binary Launch Crash**: Launching `Client-Win64-Shipping.exe` directly via Windows `startfile` bypasses Steam DRM and Kuro Games Anti-Cheat (`KRSDKExternal.exe`), causing an immediate Unreal Engine **"Fatal Error!"**.
+* **Fix**:
+  1. Updated `window.py` with native Win32 `GetModuleFileNameEx` / `QueryFullProcessImageName` and Wine-safe window matching.
+  2. Updated `config.py` so `calculate_pc_exe_path` returns `steam://rungameid/3513350` to trigger clean Steam launching without anti-cheat crashes.
+  3. Launch OK-WW inside the same Proton container via **Steam Launch Options** (see below).
 
 ---
 
@@ -33,3 +37,58 @@ A complete guide, automated setup script, and compatibility patcher for running 
 * **Symptom**: `ImportError: DLL load failed while importing QtCore: Module not found.`
 * **Root Cause**: `Qt6Core.dll` dynamically links to `icuuc.dll` and `icuin.dll`. Wine provides these in `icu.dll` without the unversioned aliases.
 * **Fix**: Copy/alias `icu.dll` as `icuuc.dll` and `icuin.dll` in `system32` and `syswow64`.
+
+---
+
+## 🚀 Setup & Installation
+
+### Step 1: Run Setup Script
+```bash
+git clone https://github.com/<your-user>/ok-wuwa-linux.git
+cd ok-wuwa-linux
+./setup.sh
+```
+*The setup script dynamically discovers your Steam libraries via `libraryfolders.vdf`, detects your Proton runner, applies all compatibility patches, and configures the wrapper scripts.*
+
+---
+
+### Step 2: Set Steam Launch Options
+
+To run OK-WuWa and Wuthering Waves in the **same container & Wineserver** (so OK-WuWa connects immediately to the game window with full automation and OCR support):
+
+1. Open **Steam** -> Right-click **Wuthering Waves** -> **Properties...**
+2. In the **General** tab under **Launch Options**, paste:
+
+* **For Flatpak Steam**:
+  ```bash
+  /var/mnt/LData/SteamLibrary/steamapps/compatdata/3513350/ok-wuwa-steam-wrapper.sh %command%
+  ```
+  *(or `~/.var/app/com.valvesoftware.Steam/ok-wuwa-steam-wrapper.sh %command%`)*
+
+* **For Native / System Steam**:
+  ```bash
+  ~/.local/bin/ok-wuwa-steam-wrapper %command%
+  ```
+
+3. Launch Wuthering Waves through Steam! Both the game and OK-WuWa will start together, fully connected!
+
+---
+
+## 🎮 Launching Manually
+
+* **From Application Menu**: Search for **OK-WuWa** in your desktop menu.
+* **From Terminal**:
+  ```bash
+  ok-wuwa
+  ```
+* **Tauri Launcher Mode**:
+  ```bash
+  ok-wuwa --launcher
+  ```
+
+---
+
+## 📜 License & Acknowledgements
+
+* [ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) by ok-oldking.
+* Wuthering Waves is developed by Kuro Games.
