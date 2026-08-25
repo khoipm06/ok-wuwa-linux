@@ -14,9 +14,10 @@ Fixes Applied:
 6. Explorer launch optimization under Wine to eliminate COM Shell.Application enumeration timeouts.
 7. Game executable path resolver for Steam (returns steam://rungameid/3513350 to prevent Fatal Error crashes).
 8. Wine-safe process and window matching in find_hwnd to ensure game is reliably detected.
-9. BitBlt invalid window handle guard to prevent (1400, GetWindowDC) crash loops on popups.
+9. BitBlt invalid window handle guard to prevent (1400, GetWindowDC) crash loops on transient popups.
 10. UpdateCard silence pyappify update RuntimeError when run outside standalone installer.
-11. PostMessage keypress down_time increase (0.04s) for DXVK/Proton frame tick reliability.
+11. Window focus stability: Fix Wine/X11 GetForegroundWindow focus flapping in is_foreground_window.
+12. Keypress and click duration increase (down_time=0.04s) for DXVK/Proton message pump frame-tick synchronization.
 """
 
 import os
@@ -188,7 +189,7 @@ def patch_fluent_widgets(site_packages: str):
 
 def patch_app_code(working_dir: str):
     """Patch application code inside working directory."""
-    print("[4/5] Patching application modules (window.py, translation.py, explorer.py, config.py, bitblt_utils.py, UpdateCard.py, post_message.py)...")
+    print("[4/5] Patching application modules for Wine/Proton performance & reliability...")
 
     # 1. window.py
     w_path = os.path.join(working_dir, "ok", "util", "window.py")
@@ -258,6 +259,11 @@ def patch_app_code(working_dir: str):
                 "                    return True"
             )
             w_content = w_content.replace(old_check, new_check)
+
+        if "if is_wine():\n        return win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd)" not in w_content:
+            old_fg = "def is_foreground_window(hwnd):\n    return win32gui.IsWindowVisible(hwnd) and win32gui.GetForegroundWindow() == hwnd"
+            new_fg = "def is_foreground_window(hwnd):\n    if is_wine():\n        return win32gui.IsWindowVisible(hwnd) and not win32gui.IsIconic(hwnd)\n    return win32gui.IsWindowVisible(hwnd) and win32gui.GetForegroundWindow() == hwnd"
+            w_content = w_content.replace(old_fg, new_fg)
 
         with open(w_path, "w", encoding="utf-8") as f:
             f.write(w_content)
@@ -357,19 +363,22 @@ def patch_app_code(working_dir: str):
                 f.write(uc_content)
             print("  -> Patched ok/ui/qt/about/UpdateCard.py")
 
-    # 7. post_message.py (Wine frame-tick keypress reliability)
-    pm_path = os.path.join(working_dir, "ok", "device", "interaction_methods", "post_message.py")
-    if os.path.isfile(pm_path):
-        with open(pm_path, "r", encoding="utf-8") as f:
-            pm_content = f.read()
-        if "down_time=0.04" not in pm_content:
-            pm_content = pm_content.replace(
-                "def send_key(self, key, down_time=0.01):",
-                "def send_key(self, key, down_time=0.04):"
-            )
-            with open(pm_path, "w", encoding="utf-8") as f:
-                f.write(pm_content)
-            print("  -> Patched ok/device/interaction_methods/post_message.py")
+    # 7. Interaction down_time synchronization (post_message.py, BaseChar.py, BaseWWTask.py, task.py)
+    for module_rel, old_txt, new_txt in [
+        (os.path.join("ok", "device", "interaction_methods", "post_message.py"), "down_time=0.01", "down_time=0.04"),
+        (os.path.join("src", "char", "BaseChar.py"), "down_time=0.01", "down_time=0.04"),
+        (os.path.join("src", "task", "BaseWWTask.py"), "down_time=0.01", "down_time=0.04"),
+        (os.path.join("ok", "task", "task.py"), "down_time=0.01", "down_time=0.04"),
+    ]:
+        p = os.path.join(working_dir, module_rel)
+        if os.path.isfile(p):
+            with open(p, "r", encoding="utf-8") as f:
+                c = f.read()
+            if old_txt in c:
+                c = c.replace(old_txt, new_txt)
+                with open(p, "w", encoding="utf-8") as f:
+                    f.write(c)
+                print(f"  -> Patched {module_rel} down_time to 0.04s")
 
 
 def main():
