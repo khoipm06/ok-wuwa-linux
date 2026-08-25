@@ -161,16 +161,16 @@ if [ -f "${ICON_SRC}" ]; then
     cp "${ICON_SRC}" "${HOME}/.local/share/icons/ok-wuwa.png"
 fi
 
-# 6a. Standalone Launcher Script (~/.local/bin/ok-wuwa)
+# 6a. Standalone Independent Launcher Script (~/.local/bin/ok-wuwa)
 LAUNCHER_PATH="${HOME}/.local/bin/ok-wuwa"
 cat << 'LAUNCHER_EOF' > "${LAUNCHER_PATH}"
 #!/usr/bin/env bash
 set -e
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="3513350"
+APP_NAME="OK-WuWa"
 
-# Discover library folders
+# 1. Discover Steam library folders
 VDF_CANDIDATES=(
     "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
     "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
@@ -191,6 +191,13 @@ for vdf in "${VDF_CANDIDATES[@]}"; do
     fi
 done
 
+# Deduplicate
+if [ ${#STEAM_LIBS[@]} -gt 0 ]; then
+    readarray -t STEAM_LIBS < <(printf '%s
+' "${STEAM_LIBS[@]}" | sort -u)
+fi
+
+# 2. Locate Prefix for Wuthering Waves (3513350)
 PFX_PATH=""
 for lib in "${STEAM_LIBS[@]}"; do
     cand="${lib}/steamapps/compatdata/${APP_ID}/pfx"
@@ -202,15 +209,21 @@ if [ -z "$PFX_PATH" ]; then
 fi
 
 if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
-    echo "Error: Prefix for App ID ${APP_ID} not found." >&2
+    echo "Error: Prefix for App ID ${APP_ID} not found. Launch Wuthering Waves once via Steam first." >&2
     exit 1
 fi
 
 COMPAT_DATA_PATH="$(dirname "${PFX_PATH}")"
 
-# Find Proton runner
+# 3. Locate Steam Linux Runtime container entry point (_v2-entry-point)
+ENTRY_POINT=""
+for lib in "${STEAM_LIBS[@]}"; do
+    cand=$(find "${lib}/steamapps/common" -maxdepth 3 -name "_v2-entry-point" -type f -perm -111 2>/dev/null | sort -V | tail -n 1 || true)
+    [ -n "$cand" ] && { ENTRY_POINT="$cand"; break; }
+done
+
+# 4. Locate Proton runner
 PROTON_BIN=""
-PROTON_DIR=""
 SEARCH_DIRS=(
     "${HOME}/.steam/root/compatibilitytools.d"
     "${HOME}/.local/share/Steam/compatibilitytools.d"
@@ -224,7 +237,7 @@ done
 for dir in "${SEARCH_DIRS[@]}"; do
     if [ -d "$dir" ]; then
         cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | grep -E "Proton-CachyOS|GE-Proton|Proton - Experimental|Proton [0-9]" | head -n 1 || true)
-        [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; PROTON_DIR="$(dirname "$cand")"; break; }
+        [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; break; }
     fi
 done
 
@@ -232,67 +245,66 @@ if [ -z "$PROTON_BIN" ]; then
     for dir in "${SEARCH_DIRS[@]}"; do
         if [ -d "$dir" ]; then
             cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | head -n 1 || true)
-            [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; PROTON_DIR="$(dirname "$cand")"; break; }
+            [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; break; }
         fi
     done
 fi
 
-# Ensure ICU DLL aliases
-SYSTEM32="${PFX_PATH}/drive_c/windows/system32"
-SYSWOW64="${PFX_PATH}/drive_c/windows/syswow64"
-if [ -f "${SYSTEM32}/icu.dll" ]; then
-    [ ! -f "${SYSTEM32}/icuuc.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuuc.dll"
-    [ ! -f "${SYSTEM32}/icuin.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuin.dll"
-fi
-if [ -f "${SYSWOW64}/icu.dll" ]; then
-    [ ! -f "${SYSWOW64}/icuuc.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuuc.dll"
-    [ ! -f "${SYSWOW64}/icuin.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuin.dll"
-fi
-
+# 5. Check if Flatpak Steam is used
+IS_FLATPAK=false
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
-[ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] && STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
+    IS_FLATPAK=true
+    STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
+fi
 
-export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
-export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
-
-# Find OK-WW app folder in prefix
+# 6. Locate OK-WW application directory
 APP_DIR=""
-for u in "steamuser" "${USER}" "default"; do
+for u in "steamuser" "${USER}" "default" "steamuser"; do
     cand="${PFX_PATH}/drive_c/users/${u}/AppData/Local/ok-ww"
     [ -d "$cand" ] && { APP_DIR="$cand"; break; }
 done
+
 [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
-
 WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
-PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
+PYTHON_EXE="C:\users\steamuser\AppData\Local\ok-ww\data\apps\ok-ww\python\python.exe"
+MAIN_PY="C:\users\steamuser\AppData\Local\ok-ww\data\apps\ok-ww\working\main.py"
+LAUNCHER_EXE="C:\users\steamuser\AppData\Local\ok-ww\ok-ww.exe"
 
-# If umu-run is available on the system, prefer using umu-run
-if command -v umu-run >/dev/null 2>&1; then
-    export GAMEID="${APP_ID}"
-    export STORE="steam"
-    export WINEPREFIX="${PFX_PATH}"
-    [ -n "${PROTON_DIR}" ] && export PROTONPATH="${PROTON_DIR}"
-    
-    if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
-        cd "${APP_DIR}"
-        exec umu-run "C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe" "${@:2}"
-    else
-        cd "${WORKING_DIR}"
-        exec umu-run "${PYTHON_EXE}" "main.py" "$@"
-    fi
+export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
+
+# 7. Execute OK-WuWa inside the Steam Linux Runtime container
+TARGET_EXE="${PYTHON_EXE}"
+TARGET_ARG="${MAIN_PY}"
+
+if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
+    TARGET_EXE="${LAUNCHER_EXE}"
+    TARGET_ARG=""
+    shift
 fi
 
-# Direct Proton execution fallback
-if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
-    cd "${APP_DIR}"
-    exec "${PROTON_BIN}" run "C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe" "${@:2}"
-else
+if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
+    exec flatpak run \
+        --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
+        --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
+        --env=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS}" \
+        --command="${ENTRY_POINT}" \
+        com.valvesoftware.Steam \
+        --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
+elif [ -n "${ENTRY_POINT}" ]; then
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
     cd "${WORKING_DIR}"
-    exec "${PROTON_BIN}" run "${PYTHON_EXE}" "main.py" "$@"
+    exec "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
+else
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+    cd "${WORKING_DIR}"
+    exec "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
 fi
 LAUNCHER_EOF
 chmod +x "${LAUNCHER_PATH}"
+
 
 # 6b. Steam Launch Options Wrapper
 WRAPPER_PATH="${HOME}/.local/bin/ok-wuwa-steam-wrapper"
