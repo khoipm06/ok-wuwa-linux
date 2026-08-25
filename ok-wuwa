@@ -42,7 +42,7 @@ if [ -z "$PFX_PATH" ]; then
 fi
 
 if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
-    echo "Error: Prefix for App ID ${APP_ID} not found. Launch Wuthering Waves once via Steam first." >&2
+    echo "Error: Prefix for App ID ${APP_ID} not found. Please launch Wuthering Waves once via Steam first." >&2
     exit 1
 fi
 
@@ -83,7 +83,19 @@ if [ -z "$PROTON_BIN" ]; then
     done
 fi
 
-# 5. Check if Flatpak Steam is used
+# 5. Ensure ICU DLL aliases in Wine system directories
+SYSTEM32="${PFX_PATH}/drive_c/windows/system32"
+SYSWOW64="${PFX_PATH}/drive_c/windows/syswow64"
+if [ -f "${SYSTEM32}/icu.dll" ]; then
+    [ ! -f "${SYSTEM32}/icuuc.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuuc.dll" 2>/dev/null || true
+    [ ! -f "${SYSTEM32}/icuin.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuin.dll" 2>/dev/null || true
+fi
+if [ -f "${SYSWOW64}/icu.dll" ]; then
+    [ ! -f "${SYSWOW64}/icuuc.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuuc.dll" 2>/dev/null || true
+    [ ! -f "${SYSWOW64}/icuin.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuin.dll" 2>/dev/null || true
+fi
+
+# 6. Check if Flatpak Steam is used
 IS_FLATPAK=false
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
 if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
@@ -91,7 +103,7 @@ if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (comm
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
 fi
 
-# 6. Locate OK-WW application directory
+# 7. Locate OK-WW application directory inside prefix
 APP_DIR=""
 for u in "steamuser" "${USER}" "default" "steamuser"; do
     cand="${PFX_PATH}/drive_c/users/${u}/AppData/Local/ok-ww"
@@ -106,7 +118,6 @@ LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
 
 export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
 
-# 7. Execute OK-WuWa inside the Steam Linux Runtime container
 TARGET_EXE="${PYTHON_EXE}"
 TARGET_ARG="${MAIN_PY}"
 
@@ -116,6 +127,7 @@ if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
     shift
 fi
 
+# 8. Execute OK-WuWa inside the Steam Linux Runtime container
 if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
