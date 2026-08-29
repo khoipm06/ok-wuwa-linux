@@ -18,6 +18,7 @@ Fixes Applied:
 10. UpdateCard silence pyappify update RuntimeError when run outside standalone installer.
 11. Window focus stability: Fix Wine/X11 GetForegroundWindow focus flapping in is_foreground_window.
 12. Keypress and click duration increase (down_time=0.04s) for DXVK/Proton message pump frame-tick synchronization.
+13. Deadlock prevention: Disable continuous WM_ACTIVATE message flooding in PostMessage on Wine.
 """
 
 import os
@@ -363,7 +364,30 @@ def patch_app_code(working_dir: str):
                 f.write(uc_content)
             print("  -> Patched ok/ui/qt/about/UpdateCard.py")
 
-    # 7. Interaction down_time synchronization (post_message.py, BaseChar.py, BaseWWTask.py, task.py)
+    # 7. post_message.py (Wine deadlock prevention: disable continuous WM_ACTIVATE spam)
+    pm_path = os.path.join(working_dir, "ok", "device", "interaction_methods", "post_message.py")
+    if os.path.isfile(pm_path):
+        with open(pm_path, "r", encoding="utf-8") as f:
+            pm_content = f.read()
+        if "def is_wine():" not in pm_content:
+            wine_fn = (
+                "def is_wine():\n"
+                "    try:\n"
+                "        import ctypes\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+            )
+            pm_content = pm_content.replace("logger = Logger.get_logger(__name__)", "logger = Logger.get_logger(__name__)\n\n" + wine_fn)
+        if "if is_wine():\n            return" not in pm_content:
+            old_try = "    def try_activate(self):\n        base_hwnd = self.hwnd_window.hwnd"
+            new_try = "    def try_activate(self):\n        if is_wine():\n            return\n        base_hwnd = self.hwnd_window.hwnd"
+            pm_content = pm_content.replace(old_try, new_try)
+        with open(pm_path, "w", encoding="utf-8") as f:
+            f.write(pm_content)
+        print("  -> Patched ok/device/interaction_methods/post_message.py (try_activate)")
+
+    # 8. Interaction down_time synchronization (post_message.py, BaseChar.py, BaseWWTask.py, task.py)
     for module_rel, old_txt, new_txt in [
         (os.path.join("ok", "device", "interaction_methods", "post_message.py"), "down_time=0.01", "down_time=0.04"),
         (os.path.join("src", "char", "BaseChar.py"), "down_time=0.01", "down_time=0.04"),
