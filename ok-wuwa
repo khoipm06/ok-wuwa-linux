@@ -126,22 +126,42 @@ if [ "$1" = "--direct" ] || [ "$1" = "--python" ] || [ ! -f "${PFX_PATH}/drive_c
     [ "$1" = "--direct" ] || [ "$1" = "--python" ] && shift
 fi
 
+# Detect installed WebView2 Runtime path
+WV2_DIR=""
+for check_path in "${PFX_PATH}/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application" "${PFX_PATH}/drive_c/Program Files/Microsoft/EdgeWebView/Application"; do
+    if [ -d "$check_path" ]; then
+        for v_dir in "$check_path"/*; do
+            if [ -d "$v_dir" ] && [ -f "${v_dir}/msedgewebview2.exe" ]; then
+                v_name="$(basename "$v_dir")"
+                WV2_DIR="C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\${v_name}"
+                break 2
+            fi
+        done
+    fi
+done
+
+WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
+
 # 7. Execute OK-WuWa inside the Steam Linux Runtime container
 if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
         --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
+        ${WV2_DIR:+--env=WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"} \
+        --env=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}" \
         --command="${ENTRY_POINT}" \
         com.valvesoftware.Steam \
         --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
 elif [ -n "${ENTRY_POINT}" ]; then
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-    cd "${WORKING_DIR}"
+    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
+    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
     exec "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
 else
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-    cd "${WORKING_DIR}"
+    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
+    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
     exec "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
 fi

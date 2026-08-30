@@ -1,85 +1,89 @@
 #!/usr/bin/env bash
-# ==============================================================================
-# Steam Companion Launch Option Wrapper for Wuthering Waves + OK-WuWa
-# ==============================================================================
+# Steam Launch Option Companion for OK-WuWa
 
-cleanup() {
-    [ -n "$COMPANION_PID" ] && kill "$COMPANION_PID" 2>/dev/null || true
-}
-trap cleanup EXIT INT TERM
+set -e
 
-# 1. Launch primary game command in background
-"$@" &
-GAME_PID=$!
+APP_ID="3513350"
+APP_NAME="OK-WuWa"
 
-# 2. Extract container runner and proton binary from Steam invocation
-ENTRY_POINT=""
-PROTON_BIN=""
+PFX_PATH="${STEAM_COMPAT_DATA_PATH:-""}"
+if [ -n "$PFX_PATH" ] && [ -d "${PFX_PATH}/pfx" ]; then
+    PFX_PATH="${PFX_PATH}/pfx"
+fi
 
-for arg in "$@"; do
-    if [[ "$arg" == *"_v2-entry-point"* ]]; then
-        ENTRY_POINT="$arg"
-    elif [[ "$arg" == *"/proton"* ]] || [[ "$arg" == *"proton" && -x "$arg" ]]; then
-        PROTON_BIN="$arg"
-    fi
-done
-
-# 3. Launch OK-WuWa companion after short delay
-(
-    set +e
-    sleep 8
-
-    if kill -0 "${GAME_PID}" 2>/dev/null; then
-        export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
-        
-        APP_DIR=""
-        for base in "${STEAM_COMPAT_DATA_PATH}" "${HOME}"; do
-            if [ -n "$base" ]; then
-                for u in "steamuser" "${USER}" "default" "steamuser"; do
-                    cand="${base}/pfx/drive_c/users/${u}/AppData/Local/ok-ww"
-                    [ -d "$cand" ] && { APP_DIR="$cand"; break 2; }
-                    cand="${base}/drive_c/users/${u}/AppData/Local/ok-ww"
-                    [ -d "$cand" ] && { APP_DIR="$cand"; break 2; }
-                done
-            fi
-        done
-
-        if [ -z "$APP_DIR" ]; then
-            APP_DIR=$(find "${STEAM_COMPAT_DATA_PATH:-${HOME}}" -path "*/AppData/Local/ok-ww/ok-ww.exe" -type f 2>/dev/null | head -n 1 || true)
-            [ -n "$APP_DIR" ] && APP_DIR="$(dirname "$APP_DIR")"
+if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
+    VDF_CANDIDATES=(
+        "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
+        "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
+        "${HOME}/.local/share/Steam/steamapps/libraryfolders.vdf"
+        "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/libraryfolders.vdf"
+        "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"
+    )
+    for vdf in "${VDF_CANDIDATES[@]}"; do
+        if [ -f "$vdf" ]; then
+            while IFS= read -r line; do
+                if [[ "$line" =~ \"path\"[[:space:]]+\"([^\"]+)\" ]]; then
+                    cand="${BASH_REMATCH[1]}/steamapps/compatdata/${APP_ID}/pfx"
+                    [ -d "$cand" ] && { PFX_PATH="$cand"; break 2; }
+                fi
+            done < "$vdf"
         fi
+    done
+fi
 
-        WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
-        LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
-        PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
-        MAIN_PY="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
-        
-        TARGET_EXE="${LAUNCHER_EXE}"
-        TARGET_ARG=""
+if [ -n "$PFX_PATH" ] && [ -d "$PFX_PATH" ]; then
+    APP_DIR=""
+    if [ -d "${PFX_PATH}/drive_c/users" ]; then
+        for u_dir in "${PFX_PATH}/drive_c/users"/*; do
+            cand="${u_dir}/AppData/Local/ok-ww"
+            [ -d "$cand" ] && { APP_DIR="$cand"; break; }
+        done
+    fi
+    [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
 
-        LOG_DIR="${WORKING_DIR}/logs"
-        mkdir -p "${LOG_DIR}" 2>/dev/null || true
-        WRAPPER_LOG="${LOG_DIR}/steam_wrapper.log"
+    TARGET_EXE="${APP_DIR}/ok-ww.exe"
+    TARGET_ARG=""
 
-        echo "[$(date)] Starting OK-WuWa companion via Steam Launch Options..." >> "${WRAPPER_LOG}"
+    if [ ! -f "${TARGET_EXE}" ]; then
+        PYTHON_EXE="${APP_DIR}/data/apps/ok-ww/python/python.exe"
+        MAIN_PY="${APP_DIR}/data/apps/ok-ww/working/main.py"
+        if [ -f "${PYTHON_EXE}" ] && [ -f "${MAIN_PY}" ]; then
+            TARGET_EXE="${PYTHON_EXE}"
+            TARGET_ARG="${MAIN_PY}"
+        fi
+    fi
 
-        # If Proton was not in command line, find it dynamically
-        if [ -z "${PROTON_BIN}" ]; then
-            for p_dir in "${HOME}/.local/share/Steam/compatibilitytools.d" "${HOME}/compatibilitytools.d" "${HOME}/.steam/root/compatibilitytools.d" "/app/share/steam/compatibilitytools.d"; do
-                if [ -d "$p_dir" ]; then
-                    cand=$(find "$p_dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | grep -E "Proton-CachyOS|GE-Proton|Proton - Experimental|Proton [0-9]" | head -n 1 || true)
-                    [ -n "$cand" ] && { PROTON_BIN="$cand"; break; }
+    # Detect installed WebView2 Runtime path
+    WV2_DIR=""
+    for check_path in "${PFX_PATH}/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application" "${PFX_PATH}/drive_c/Program Files/Microsoft/EdgeWebView/Application"; do
+        if [ -d "$check_path" ]; then
+            for v_dir in "$check_path"/*; do
+                if [ -d "$v_dir" ] && [ -f "${v_dir}/msedgewebview2.exe" ]; then
+                    v_name="$(basename "$v_dir")"
+                    WV2_DIR="C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\${v_name}"
+                    break 2
                 fi
             done
         fi
+    done
 
-        if [ -n "${ENTRY_POINT}" ] && [ -n "${PROTON_BIN}" ]; then
-            "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >> "${WRAPPER_LOG}" 2>&1
-        elif [ -n "${PROTON_BIN}" ]; then
-            "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >> "${WRAPPER_LOG}" 2>&1
-        fi
+    WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
+
+    if [ -f "${TARGET_EXE}" ]; then
+        (
+            sleep 4
+            [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
+            export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
+            if [ -n "${PROTON_BIN:-}" ] && [ -x "${PROTON_BIN}" ]; then
+                "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >/dev/null 2>&1 &
+            elif [ -n "${STEAM_COMPAT_TOOL_PATHS:-}" ]; then
+                PROTON_TOOL=$(echo "${STEAM_COMPAT_TOOL_PATHS}" | tr ':' '\n' | head -n 1)
+                if [ -f "${PROTON_TOOL}/proton" ]; then
+                    "${PROTON_TOOL}/proton" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >/dev/null 2>&1 &
+                fi
+            fi
+        ) &
     fi
-) &
-COMPANION_PID=$!
+fi
 
-wait "${GAME_PID}"
+exec "$@"
