@@ -101,8 +101,10 @@ if [ -z "$PROTON_BIN" ] || [ ! -x "$PROTON_BIN" ]; then
 fi
 echo "  -> Using Proton: ${PROTON_BIN}"
 
+IS_FLATPAK=false
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
-if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ]; then
+if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
+    IS_FLATPAK=true
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
 fi
 
@@ -148,6 +150,15 @@ chmod +x "${HOME}/.local/bin/ok-wuwa"
 cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/bin/ok-wuwa-steam-wrapper"
 chmod +x "${HOME}/.local/bin/ok-wuwa-steam-wrapper"
 
+# If Flatpak Steam is used, also install wrapper into Flatpak-accessible paths
+WRAPPER_COMMAND="${HOME}/.local/bin/ok-wuwa-steam-wrapper"
+if [ "$IS_FLATPAK" = true ]; then
+    FLATPAK_WRAPPER="${COMPAT_DATA_PATH}/ok-wuwa-steam-wrapper.sh"
+    cp "${SCRIPT_DIR}/steam-wrapper.sh" "${FLATPAK_WRAPPER}"
+    chmod +x "${FLATPAK_WRAPPER}"
+    WRAPPER_COMMAND="${FLATPAK_WRAPPER}"
+fi
+
 # Desktop Entry (~/.local/share/applications/ok-wuwa.desktop)
 DESKTOP_PATH="${HOME}/.local/share/applications/ok-wuwa.desktop"
 cat << DESKTOP_EOF > "${DESKTOP_PATH}"
@@ -165,10 +176,10 @@ chmod +x "${DESKTOP_PATH}"
 
 echo "=========================================================="
 echo " Setup Complete!"
-echo " 1. Run independently anytime (Game first OR OK-WuWa first):"
+echo " 1. Primary Launcher (Official ok-ww.exe UI):"
 echo "    ok-wuwa"
 echo ""
-echo " 2. (Optional) Run alongside Wuthering Waves via Steam Launch Options:"
+echo " 2. (Optional) Run alongside Wuthering Waves in Steam:"
 echo "    Steam -> Wuthering Waves -> Properties -> Launch Options:"
-echo "    ~/.local/bin/ok-wuwa-steam-wrapper %command%"
+echo "    ${WRAPPER_COMMAND} %command%"
 echo "=========================================================="

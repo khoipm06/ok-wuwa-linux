@@ -118,13 +118,14 @@ LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
 
 export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
 
-TARGET_EXE="${PYTHON_EXE}"
-TARGET_ARG="${MAIN_PY}"
+# Default to the official main launcher (ok-ww.exe)
+TARGET_EXE="${LAUNCHER_EXE}"
+TARGET_ARG=""
 
-if [ "$1" = "--launcher" ] || [ "$1" = "--updater" ]; then
-    TARGET_EXE="${LAUNCHER_EXE}"
-    TARGET_ARG=""
-    shift
+if [ "$1" = "--direct" ] || [ "$1" = "--python" ] || [ ! -f "${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww/ok-ww.exe" ]; then
+    TARGET_EXE="${PYTHON_EXE}"
+    TARGET_ARG="${MAIN_PY}"
+    [ "$1" = "--direct" ] || [ "$1" = "--python" ] && shift
 fi
 
 # 8. Execute OK-WuWa inside the Steam Linux Runtime container

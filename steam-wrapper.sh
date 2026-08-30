@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Optional Steam Companion Launch Option Wrapper for Wuthering Waves + OK-WuWa
-#
-# Usage in Steam -> Wuthering Waves -> Properties -> Launch Options:
-#   ~/.local/bin/ok-wuwa-steam-wrapper %command%
+# Steam Companion Launch Option Wrapper for Wuthering Waves + OK-WuWa
 # ==============================================================================
 
 cleanup() {
@@ -27,10 +24,10 @@ for arg in "$@"; do
     fi
 done
 
-# 3. Launch OK-WuWa companion in background
+# 3. Launch OK-WuWa companion after short delay
 (
     set +e
-    sleep 7
+    sleep 8
 
     if kill -0 "${GAME_PID}" 2>/dev/null; then
         export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
@@ -48,21 +45,23 @@ done
         done
 
         if [ -z "$APP_DIR" ]; then
-            APP_DIR=$(find "${STEAM_COMPAT_DATA_PATH:-${HOME}}" -path "*/AppData/Local/ok-ww/data/apps/ok-ww/working" -type d 2>/dev/null | head -n 1 || true)
-            [ -n "$APP_DIR" ] && APP_DIR="$(dirname "$(dirname "$(dirname "$APP_DIR")")")"
+            APP_DIR=$(find "${STEAM_COMPAT_DATA_PATH:-${HOME}}" -path "*/AppData/Local/ok-ww/ok-ww.exe" -type f 2>/dev/null | head -n 1 || true)
+            [ -n "$APP_DIR" ] && APP_DIR="$(dirname "$APP_DIR")"
         fi
 
         WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
+        LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
         PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
         MAIN_PY="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
+        
+        TARGET_EXE="${LAUNCHER_EXE}"
+        TARGET_ARG=""
+
         LOG_DIR="${WORKING_DIR}/logs"
-        mkdir -p "${LOG_DIR}"
+        mkdir -p "${LOG_DIR}" 2>/dev/null || true
         WRAPPER_LOG="${LOG_DIR}/steam_wrapper.log"
 
         echo "[$(date)] Starting OK-WuWa companion via Steam Launch Options..." >> "${WRAPPER_LOG}"
-        echo "  Entry point: ${ENTRY_POINT}" >> "${WRAPPER_LOG}"
-        echo "  Proton: ${PROTON_BIN}" >> "${WRAPPER_LOG}"
-        echo "  App Dir: ${APP_DIR}" >> "${WRAPPER_LOG}"
 
         # If Proton was not in command line, find it dynamically
         if [ -z "${PROTON_BIN}" ]; then
@@ -74,13 +73,10 @@ done
             done
         fi
 
-        if [ -d "${WORKING_DIR}" ]; then
-            cd "${WORKING_DIR}"
-            if [ -n "${ENTRY_POINT}" ] && [ -n "${PROTON_BIN}" ]; then
-                "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${PYTHON_EXE}" "${MAIN_PY}" >> "${WRAPPER_LOG}" 2>&1
-            elif [ -n "${PROTON_BIN}" ]; then
-                "${PROTON_BIN}" run "${PYTHON_EXE}" "${MAIN_PY}" >> "${WRAPPER_LOG}" 2>&1
-            fi
+        if [ -n "${ENTRY_POINT}" ] && [ -n "${PROTON_BIN}" ]; then
+            "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >> "${WRAPPER_LOG}" 2>&1
+        elif [ -n "${PROTON_BIN}" ]; then
+            "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >> "${WRAPPER_LOG}" 2>&1
         fi
     fi
 ) &
