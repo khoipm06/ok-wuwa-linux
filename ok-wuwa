@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="3513350"
 APP_NAME="OK-WuWa"
 
@@ -98,10 +99,12 @@ fi
 
 # 6. Locate OK-WW application directory inside prefix
 APP_DIR=""
-for u in "steamuser" "${USER}" "default" "steamuser"; do
-    cand="${PFX_PATH}/drive_c/users/${u}/AppData/Local/ok-ww"
-    [ -d "$cand" ] && { APP_DIR="$cand"; break; }
-done
+if [ -d "${PFX_PATH}/drive_c/users" ]; then
+    for u_dir in "${PFX_PATH}/drive_c/users"/*; do
+        cand="${u_dir}/AppData/Local/ok-ww"
+        [ -d "$cand" ] && { APP_DIR="$cand"; break; }
+    done
+fi
 
 [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
 WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
@@ -109,7 +112,10 @@ PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\pyth
 MAIN_PY="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
 LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
 
-export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
+# If working directory exists, ensure patches are active
+if [ -d "${WORKING_DIR}" ] && [ -f "${SCRIPT_DIR}/patch_wine_compat.py" ]; then
+    python3 "${SCRIPT_DIR}/patch_wine_compat.py" "${PFX_PATH}" >/dev/null 2>&1 || true
+fi
 
 TARGET_EXE="${LAUNCHER_EXE}"
 TARGET_ARG=""
@@ -125,7 +131,6 @@ if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
         --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
-        --env=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS}" \
         --command="${ENTRY_POINT}" \
         com.valvesoftware.Steam \
         --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"

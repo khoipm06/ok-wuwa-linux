@@ -1,6 +1,7 @@
-# OK-WuWa on Linux
+# OK-WuWa on Proton
 
 Run [ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) on Linux under Steam Proton, Flatpak Steam, and Wine.
+
 
 ## Prerequisites
 
@@ -10,12 +11,14 @@ Run [ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) on Li
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-username/ok-wuwa-linux.git
-cd ok-wuwa-linux
+git clone https://github.com/khoipm06/ok-wuwa-proton.git
+cd ok-wuwa-proton
 ./setup.sh
 ```
 
 The script locates your Steam libraries, applies Wine compatibility fixes to the prefix, and installs the desktop launcher.
+> [!NOTE]
+> Keep ok-wuwa installed in the default location, as the script is hardcoded to find it there.
 
 ## Usage
 
@@ -28,7 +31,7 @@ ok-wuwa
 ```
 
 From here you can:
-- Start OK-WuWa, then click **Start** in the UI to launch Wuthering Waves.
+- Start OK-WuWa, then click **Start** in the UI to launch Wuthering Waves. (Or enable the auto-start option in the settings.)
 - Start Wuthering Waves in Steam first, then launch OK-WuWa.
 
 ### Optional: 1-Click Steam Integration
@@ -58,7 +61,7 @@ python3 patch_wine_compat.py /path/to/prefix --revert
 
 ## Structure
 
-- `setup.sh`: Automated setup and prefix patcher.
+- `setup.sh`: Automated setup, git auto-updater, and prefix patcher.
 - `ok-wuwa`: Standalone desktop launcher for `ok-ww.exe`.
 - `steam-wrapper.sh`: Companion wrapper for Steam launch options.
-- `patch_wine_compat.py`: Safe, reversible Wine patch engine.
+- `patch_wine_compat.py`: Safe, reversible Wine patch engine with AST validation.

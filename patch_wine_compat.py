@@ -4,7 +4,7 @@ Wine / Proton Compatibility Patcher for OK-Wuthering-Waves (OK-WW)
 
 Features:
 - Transactional file patching with automatic .orig pristine backups.
-- Safe AST syntax validation before writing changes to disk.
+- Corruption detection and syntax validation via AST.
 - Idempotent: Re-running multiple times always starts from .orig and never stacks patches.
 - Full Revert / Undo support (--revert) to restore 100% stock files.
 - Patch verification and status reporting (--status, --verify).
@@ -93,34 +93,64 @@ class PatchEngine:
                         shutil.copy2(icu_src, target_path)
                         print(f"  -> Created {subdir}/{target_name}")
 
+    def fix_webview2_registry(self, revert: bool = False):
+        """Configure WebView2 Wine compatibility flags in user.reg."""
+        user_reg = os.path.join(self.prefix_path, "user.reg")
+        if not os.path.isfile(user_reg):
+            return
+
+        with open(user_reg, "r", encoding="utf-8", errors="ignore") as f:
+            content = f.read()
+
+        webview_section = "[Software\\\\Policies\\\\Microsoft\\\\Edge\\\\WebView2]\n"
+        args_val = '"AdditionalBrowserArguments"="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"\n'
+
+        if revert:
+            if webview_section in content:
+                content = content.replace(webview_section + args_val, "")
+                with open(user_reg, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print("  -> Reverted WebView2 registry settings")
+        else:
+            if webview_section not in content:
+                content += f"\n{webview_section}{args_val}\n"
+                with open(user_reg, "w", encoding="utf-8") as f:
+                    f.write(content)
+                print("  -> Configured WebView2 compatibility in user.reg")
+
     def apply_patches(self) -> bool:
         """Apply all compatibility patches idempotently with AST validation."""
         print(f"[*] Target Wine Prefix: {self.prefix_path}")
-        print("[1/4] Checking ICU DLL aliases...")
+        print("[1/5] Checking ICU DLL aliases...")
         self.fix_icu_dlls(revert=False)
+
+        print("[2/5] Configuring WebView2 registry settings...")
+        self.fix_webview2_registry(revert=False)
 
         if not self.site_packages:
             print("[WARN] Python site-packages directory not found in prefix.")
         else:
-            print(f"[2/4] Patching GUI framework packages in {self.site_packages}...")
+            print(f"[3/5] Patching GUI framework packages in {self.site_packages}...")
             self._patch_qframelesswindow()
             self._patch_qfluentwidgets()
 
         if not self.working_dir:
             print("[WARN] OK-WW working directory not found in prefix.")
         else:
-            print(f"[3/4] Patching application modules in {self.working_dir}...")
+            print(f"[4/5] Patching application modules in {self.working_dir}...")
             self._patch_app_modules()
 
-        print("[4/4] Verifying patched files...")
+        print("[5/5] Verifying patched files...")
         return self.verify()
 
     def revert_patches(self) -> bool:
-        """Revert all patches and restore pristine .orig files."""
+        """Revert all patches and restore pristine .orig files with corruption checking."""
         print(f"[*] Reverting patches in Wine Prefix: {self.prefix_path}")
         self.fix_icu_dlls(revert=True)
+        self.fix_webview2_registry(revert=True)
 
         reverted_count = 0
+        corrupted_count = 0
         users_dir = os.path.join(self.prefix_path, "drive_c", "users")
         if os.path.isdir(users_dir):
             for root, _, files in os.walk(users_dir):
@@ -128,11 +158,24 @@ class PatchEngine:
                     if f.endswith(".orig"):
                         orig_path = os.path.join(root, f)
                         target_path = orig_path[:-5]
+                        
+                        # Corruption check on pristine backup before restoring
+                        if orig_path.endswith(".py.orig"):
+                            try:
+                                with open(orig_path, "r", encoding="utf-8") as bf:
+                                    ast.parse(bf.read(), filename=orig_path)
+                            except Exception as e:
+                                print(f"  [WARN] Backup file {orig_path} failed syntax check: {e}")
+                                corrupted_count += 1
+
                         os.replace(orig_path, target_path)
                         print(f"  -> Restored: {os.path.relpath(target_path, self.prefix_path)}")
                         reverted_count += 1
 
-        print(f"[*] Successfully reverted {reverted_count} file(s) to pristine condition.")
+        if corrupted_count > 0:
+            print(f"[!] Revert completed with {corrupted_count} potential backup anomaly/anomalies.")
+        else:
+            print(f"[*] Successfully reverted {reverted_count} file(s) to pristine condition.")
         return True
 
     def get_status(self):
@@ -151,25 +194,31 @@ class PatchEngine:
                     icu_ok = False
         print(f"  [{'x' if icu_ok else ' '}] ICU DLL Aliases (system32/syswow64)")
 
-        # 2. qframelesswindow
+        # 2. WebView2 Registry
+        user_reg = os.path.join(self.prefix_path, "user.reg")
+        reg_ok = os.path.isfile(user_reg) and "Software\\\\Policies\\\\Microsoft\\\\Edge\\\\WebView2" in open(user_reg, "r", encoding="utf-8", errors="ignore").read()
+        print(f"  [{'x' if reg_ok else ' '}] WebView2 Compatibility Registry (user.reg)")
+
+        # 3. qframelesswindow
         if self.site_packages:
             wu_path = os.path.join(self.site_packages, "qframelesswindow", "utils", "win32_utils.py")
             is_patched = os.path.isfile(wu_path) and "is_wine" in open(wu_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(wu_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qframelesswindow (Mica/Glass bypass) [backup: {has_bak}]")
 
-            # 3. qfluentwidgets
+            # 4. qfluentwidgets
             fw_path = os.path.join(self.site_packages, "qfluentwidgets", "window", "fluent_window.py")
             is_patched = os.path.isfile(fw_path) and "is_wine" in open(fw_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(fw_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qfluentwidgets (Solid Backgrounds) [backup: {has_bak}]")
 
-        # 4. App Modules
+        # 5. App Modules
         if self.working_dir:
             for mod_rel, marker, name in [
                 ("ok/util/window.py", "is_wine", "Window Capture & Exe Matching"),
                 ("ok/core/translation.py", "fallback=True", "Translation Fallback"),
                 ("ok/util/explorer.py", "is_wine", "Explorer Launch Optimization"),
+                ("ok/util/process.py", "is_wine", "GPU / Process Info Guard"),
                 ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
                 ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
                 ("ok/ui/qt/about/UpdateCard.py", "not self.pyappify_app_version", "PyAppify Update Loop Silence"),
@@ -180,7 +229,7 @@ class PatchEngine:
                 print(f"  [{'x' if is_patched else ' '}] {name} ({mod_rel}) [backup: {has_bak}]")
 
     def verify(self) -> bool:
-        """Verify Python AST syntax of all target modules."""
+        """Verify Python AST syntax and integrity of all target modules."""
         errors = 0
         checked = 0
         if self.site_packages:
@@ -195,7 +244,7 @@ class PatchEngine:
                         errors += 1
 
         if self.working_dir:
-            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/about/UpdateCard.py"]:
+            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/about/UpdateCard.py"]:
                 p = os.path.join(self.working_dir, sub)
                 if os.path.isfile(p):
                     checked += 1
@@ -296,13 +345,14 @@ class PatchEngine:
             wine_func = (
                 "def is_wine():\n"
                 "    try:\n"
+                "        import ctypes\n"
                 "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
                 "    except Exception:\n"
                 "        return False\n\n"
             )
             content = content.replace(
-                "def windows_graphics_available():",
-                wine_func + "def windows_graphics_available():\n    if is_wine():\n        return False"
+                "def windows_graphics_available():\n",
+                wine_func + "def windows_graphics_available():\n    if is_wine():\n        return False\n"
             )
             old_get_exe = (
                 "def get_exe_by_hwnd(hwnd):\n"
@@ -389,7 +439,29 @@ class PatchEngine:
             if self._safe_write_python(e_path, content):
                 print("  -> Patched ok/util/explorer.py")
 
-        # 4. config.py
+        # 4. process.py (nvidia-smi guard)
+        p_path = os.path.join(self.working_dir, "ok", "util", "process.py")
+        content = self._get_pristine_content(p_path)
+        if content:
+            self._ensure_backup(p_path)
+            wine_func = (
+                "def is_wine():\n"
+                "    try:\n"
+                "        import ctypes\n"
+                "        return hasattr(ctypes.cdll.ntdll, 'wine_get_version')\n"
+                "    except Exception:\n"
+                "        return False\n\n"
+            )
+            if "def is_wine():" not in content:
+                content = wine_func + content
+            content = content.replace(
+                "def get_first_gpu_free_memory_mib():\n",
+                "def get_first_gpu_free_memory_mib():\n    if is_wine():\n        return -1\n"
+            )
+            if self._safe_write_python(p_path, content):
+                print("  -> Patched ok/util/process.py")
+
+        # 5. config.py
         c_path = os.path.join(self.working_dir, "config.py")
         content = self._get_pristine_content(c_path)
         if content:
@@ -415,7 +487,7 @@ class PatchEngine:
             if self._safe_write_python(c_path, content):
                 print("  -> Patched config.py")
 
-        # 5. bitblt_utils.py
+        # 6. bitblt_utils.py
         bu_path = os.path.join(self.working_dir, "ok", "device", "capture_methods", "bitblt_utils.py")
         content = self._get_pristine_content(bu_path)
         if content:
@@ -426,7 +498,7 @@ class PatchEngine:
             if self._safe_write_python(bu_path, content):
                 print("  -> Patched ok/device/capture_methods/bitblt_utils.py")
 
-        # 6. UpdateCard.py
+        # 7. UpdateCard.py
         uc_path = os.path.join(self.working_dir, "ok", "ui", "qt", "about", "UpdateCard.py")
         content = self._get_pristine_content(uc_path)
         if content:
@@ -444,7 +516,7 @@ def main():
     parser.add_argument("prefix", help="Path to Wine prefix or compatdata directory")
     parser.add_argument("--revert", "--undo", action="store_true", help="Revert all patches and restore pristine original files")
     parser.add_argument("--status", action="store_true", help="Show current patch status and backup existence")
-    parser.add_argument("--verify", action="store_true", help="Validate syntax of all patched Python files")
+    parser.add_argument("--verify", action="store_true", help="Validate syntax and integrity of all patched Python files")
 
     args = parser.parse_args()
     target = os.path.abspath(args.prefix)
