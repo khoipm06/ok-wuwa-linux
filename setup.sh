@@ -5,9 +5,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ID="3513350"
 APP_NAME="OK-WuWa"
 
-echo "=== OK-WuWa Linux / Proton Setup ==="
+echo "=========================================================================="
+echo "                        OK-WuWa Proton Auto-Setup                         "
+echo "=========================================================================="
+
+# Auto-update repository if running inside git checkout with remote
+if [ -d "${SCRIPT_DIR}/.git" ] && command -v git >/dev/null 2>&1; then
+    echo "[*] Checking for latest repository patches..."
+    if git -C "${SCRIPT_DIR}" remote -v 2>/dev/null | grep -q "fetch"; then
+        git -C "${SCRIPT_DIR}" pull --ff-only 2>/dev/null || echo "  -> Running local build (git pull skipped or offline)."
+    fi
+fi
 
 # 1. Discover Steam library folders
+echo "[1/5] Discovering Steam library folders..."
 VDF_CANDIDATES=(
     "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
     "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
@@ -38,8 +49,10 @@ if [ ${#STEAM_LIBS[@]} -eq 0 ]; then
         "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     )
 fi
+echo "  -> Discovered ${#STEAM_LIBS[@]} Steam library folder(s)."
 
 # 2. Locate Wuthering Waves prefix
+echo "[2/5] Locating Wuthering Waves (App ID: ${APP_ID}) prefix..."
 PFX_PATH=""
 for lib in "${STEAM_LIBS[@]}"; do
     cand="${lib}/steamapps/compatdata/${APP_ID}/pfx"
@@ -61,13 +74,20 @@ if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
     echo "Launch Wuthering Waves once in Steam before running setup."
     exit 1
 fi
-echo "Found Prefix: ${PFX_PATH}"
+echo "  -> Found Prefix: ${PFX_PATH}"
 COMPAT_DATA_PATH="$(dirname "${PFX_PATH}")"
 
 # Clean up any legacy scripts from prefix
 rm -f "${COMPAT_DATA_PATH}/ok-wuwa-steam-wrapper.sh" "${HOME}/.var/app/com.valvesoftware.Steam/ok-wuwa-steam-wrapper.sh"
 
-# 3. Detect Proton Runner
+# 3. Detect Proton Runner & Container Entry Point
+echo "[3/5] Detecting installed Proton runner & container..."
+ENTRY_POINT=""
+for lib in "${STEAM_LIBS[@]}"; do
+    cand=$(find "${lib}/steamapps/common" -maxdepth 3 -name "_v2-entry-point" -type f -perm -111 2>/dev/null | sort -V | tail -n 1 || true)
+    [ -n "$cand" ] && { ENTRY_POINT="$cand"; break; }
+done
+
 PROTON_BIN=""
 PROTON_SEARCH_DIRS=(
     "${HOME}/.steam/root/compatibilitytools.d"
@@ -100,45 +120,70 @@ if [ -z "$PROTON_BIN" ] || [ ! -x "$PROTON_BIN" ]; then
     echo "Error: No usable Proton executable found."
     exit 1
 fi
-echo "Using Proton: ${PROTON_BIN}"
+echo "  -> Using Proton: ${PROTON_BIN}"
 
-# Check Flatpak Steam and grant ~/.local/bin filesystem access
+# Check Flatpak Steam and grant specific file permission for wrapper
 IS_FLATPAK=false
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
 if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
     IS_FLATPAK=true
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     if command -v flatpak >/dev/null 2>&1; then
-        echo "Configuring Flatpak Steam sandbox permissions..."
-        flatpak override --user --filesystem="${HOME}/.local/bin:ro" com.valvesoftware.Steam 2>/dev/null || true
+        echo "  -> Configuring Flatpak Steam permissions for wrapper..."
+        flatpak override --user --filesystem="${HOME}/.local/bin/ok-wuwa-steam-wrapper:ro" com.valvesoftware.Steam 2>/dev/null || true
     fi
 fi
 
 # 4. Check OK-WW installation
 APP_DIR=""
-for u in "steamuser" "${USER}" "default" "steamuser"; do
-    cand="${PFX_PATH}/drive_c/users/${u}/AppData/Local/ok-ww"
-    [ -d "$cand" ] && { APP_DIR="$cand"; break; }
-done
+if [ -d "${PFX_PATH}/drive_c/users" ]; then
+    for u_dir in "${PFX_PATH}/drive_c/users"/*; do
+        cand="${u_dir}/AppData/Local/ok-ww"
+        [ -d "$cand" ] && { APP_DIR="$cand"; break; }
+    done
+fi
 
 if [ -z "$APP_DIR" ]; then
     APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
 fi
 
-if [ ! -d "${APP_DIR}" ]; then
-    echo "OK-WW not found in prefix. Downloading installer..."
-    TMP_INSTALLER="/tmp/ok-ww-setup.exe"
-    curl -L -o "${TMP_INSTALLER}" "https://github.com/ok-oldking/ok-wuthering-waves/releases/latest/download/ok-ww-setup.exe"
-    echo "Running installer..."
-    STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
-    STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
-    "${PROTON_BIN}" run "${TMP_INSTALLER}"
+if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
+    echo "  -> OK-WW binary not found in prefix. Downloading installer..."
+    DOWNLOAD_DIR="${PFX_PATH}/drive_c/users/steamuser/Downloads"
+    mkdir -p "${DOWNLOAD_DIR}"
+    INSTALLER_HOST="${DOWNLOAD_DIR}/ok-ww-setup.exe"
+    if [ ! -f "${INSTALLER_HOST}" ]; then
+        curl -L --fail -o "${INSTALLER_HOST}" "https://github.com/ok-oldking/ok-wuthering-waves/releases/latest/download/ok-ww-win32-Global-setup.exe"
+    fi
+    
+    echo "  -> Running installer..."
+    INSTALLER_WIN="C:\\users\\steamuser\\Downloads\\ok-ww-setup.exe"
+    TARGET_DIR="C:\\users\\steamuser\\AppData\\Local\\ok-ww"
+    if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
+        flatpak run \
+            --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
+            --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
+            --command="${ENTRY_POINT}" \
+            com.valvesoftware.Steam \
+            --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}"
+    elif [ -n "${ENTRY_POINT}" ]; then
+        export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+        export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+        "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}"
+    else
+        export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+        export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+        "${PROTON_BIN}" run "${INSTALLER_WIN}"
+    fi
+    rm -f "${INSTALLER_HOST}"
 fi
 
 # 5. Apply Compatibility Patches
+echo "[4/5] Applying Wine/Proton compatibility patches..."
 python3 "${SCRIPT_DIR}/patch_wine_compat.py" "${PFX_PATH}"
 
 # 6. Install Launchers & Conventional XDG Desktop Integration
+echo "[5/5] Installing launcher scripts and desktop integration..."
 mkdir -p "${HOME}/.local/bin" "${HOME}/.local/share/applications" "${HOME}/.local/share/icons/hicolor/256x256/apps"
 
 ICON_SRC="${APP_DIR}/data/apps/ok-ww/working/icon.png"
@@ -169,7 +214,12 @@ StartupNotify=true
 DESKTOP_EOF
 chmod +x "${DESKTOP_PATH}"
 
+echo "=========================================================================="
+echo " Setup Complete!"
+echo " 1. Run independently anytime:"
+echo "    `ok-wuwa` in shell or launch from the desktop menu."
 echo ""
-echo "Setup finished."
-echo "- Run from app launcher or terminal: ok-wuwa"
-echo "- Optional Steam Launch Option: ~/.local/bin/ok-wuwa-steam-wrapper %command%"
+echo " 2. (Optional) Run alongside Wuthering Waves via Steam Launch Options:"
+echo "    Steam -> Wuthering Waves -> Properties -> Launch Options:"
+echo "    ~/.local/bin/ok-wuwa-steam-wrapper %command%"
+echo "=========================================================================="
