@@ -148,16 +148,16 @@ if [ -z "$APP_DIR" ]; then
 fi
 
 if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
-    echo "  -> OK-WW binary not found in prefix. Downloading installer..."
+    echo "  -> OK-WW binary not found in prefix. Downloading online installer..."
     DOWNLOAD_DIR="${PFX_PATH}/drive_c/users/steamuser/Downloads"
     mkdir -p "${DOWNLOAD_DIR}"
-    INSTALLER_HOST="${DOWNLOAD_DIR}/ok-ww-setup.exe"
+    INSTALLER_HOST="${DOWNLOAD_DIR}/ok-ww-online-setup.exe"
     if [ ! -f "${INSTALLER_HOST}" ]; then
-        curl -L --fail -o "${INSTALLER_HOST}" "https://github.com/ok-oldking/ok-wuthering-waves/releases/latest/download/ok-ww-win32-Global-setup.exe"
+        curl -L --fail -o "${INSTALLER_HOST}" "https://github.com/ok-oldking/ok-wuthering-waves/releases/latest/download/ok-ww-win32-online-setup.exe"
     fi
     
     echo "  -> Running installer..."
-    INSTALLER_WIN="C:\\users\\steamuser\\Downloads\\ok-ww-setup.exe"
+    INSTALLER_WIN="C:\\users\\steamuser\\Downloads\\ok-ww-online-setup.exe"
     TARGET_DIR="C:\\users\\steamuser\\AppData\\Local\\ok-ww"
     if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
         flatpak run \
@@ -165,17 +165,16 @@ if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
             --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
             --command="${ENTRY_POINT}" \
             com.valvesoftware.Steam \
-            --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}"
+            --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}" /S "/D=${TARGET_DIR}" >/dev/null 2>&1 || true
     elif [ -n "${ENTRY_POINT}" ]; then
         export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
         export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-        "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}"
+        "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${INSTALLER_WIN}" /S "/D=${TARGET_DIR}" >/dev/null 2>&1 || true
     else
         export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
         export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-        "${PROTON_BIN}" run "${INSTALLER_WIN}"
+        "${PROTON_BIN}" run "${INSTALLER_WIN}" /S "/D=${TARGET_DIR}" >/dev/null 2>&1 || true
     fi
-    rm -f "${INSTALLER_HOST}"
 fi
 
 # 5. Apply Compatibility Patches
@@ -217,7 +216,7 @@ chmod +x "${DESKTOP_PATH}"
 echo "=========================================================================="
 echo " Setup Complete!"
 echo " 1. Run independently anytime:"
-echo "    `ok-wuwa` in shell or launch from the desktop menu."
+echo "    \`ok-wuwa\` in shell or launch from the desktop menu."
 echo ""
 echo " 2. (Optional) Run alongside Wuthering Waves via Steam Launch Options:"
 echo "    Steam -> Wuthering Waves -> Properties -> Launch Options:"

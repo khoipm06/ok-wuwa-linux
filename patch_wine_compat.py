@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
 Wine / Proton Compatibility Patcher for OK-Wuthering-Waves (OK-WW)
-
+Repository: https://github.com/khoipm06/ok-wuwa-proton
 
 Features:
 - Transactional file patching with automatic .orig pristine backups.
-- Auto-registers installed WebView2 Runtime so Tauri/Wry detects it.
-- Configures Chromium/WebView2 software rendering flags for Wine.
-- Strict verification: fails if application files are missing or syntax invalid.
-- Corruption detection and syntax validation via AST.
-- Full registry cleanup for complete uninstall without NSIS leftovers.
+- Strict syntax and AST verification.
 - Idempotent: Re-running multiple times always starts from .orig and never stacks patches.
 - Full Revert / Undo support (--revert) to restore 100% stock files.
 - Patch verification and status reporting (--status, --verify).
@@ -98,139 +94,32 @@ class PatchEngine:
                         shutil.copy2(icu_src, target_path)
                         print(f"  -> Created {subdir}/{target_name}")
 
-    def fix_webview2_registry(self, revert: bool = False):
-        """Configure WebView2 Runtime registration and compatibility flags."""
-        user_reg = os.path.join(self.prefix_path, "user.reg")
-        system_reg = os.path.join(self.prefix_path, "system.reg")
-
-        # 1. Detect installed WebView2 version
-        wv2_version = None
-        wv2_app_dir = os.path.join(self.prefix_path, "drive_c", "Program Files (x86)", "Microsoft", "EdgeWebView", "Application")
-        if not os.path.isdir(wv2_app_dir):
-            wv2_app_dir = os.path.join(self.prefix_path, "drive_c", "Program Files", "Microsoft", "EdgeWebView", "Application")
-
-        if os.path.isdir(wv2_app_dir):
-            for entry in os.listdir(wv2_app_dir):
-                if entry[0].isdigit() and os.path.isfile(os.path.join(wv2_app_dir, entry, "msedgewebview2.exe")):
-                    wv2_version = entry
-                    break
-
-        if revert:
-            # Revert policy flags
-            for reg_path in [user_reg, system_reg]:
-                if os.path.isfile(reg_path):
-                    with open(reg_path, "r", encoding="utf-8", errors="ignore") as f:
-                        lines = f.readlines()
-                    new_lines = []
-                    skip = False
-                    for line in lines:
-                        if line.startswith("[Software\\\\Policies\\\\Microsoft\\\\Edge\\\\WebView2]"):
-                            skip = True
-                        elif line.startswith("[") and skip:
-                            skip = False
-                        if not skip:
-                            new_lines.append(line)
-                    with open(reg_path, "w", encoding="utf-8") as f:
-                        f.writelines(new_lines)
-            print("  -> Reverted WebView2 registry settings")
-            return
-
-        # 2. Register WebView2 Runtime Clients keys in user.reg and system.reg
-        if wv2_version:
-            guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-            for reg_path in [user_reg, system_reg]:
-                if not os.path.isfile(reg_path):
-                    continue
-                with open(reg_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-
-                client_sec = f"[Software\\\\Microsoft\\\\EdgeUpdate\\\\Clients\\\\{guid}]\n"
-                client_wow_sec = f"[Software\\\\Wow6432Node\\\\Microsoft\\\\EdgeUpdate\\\\Clients\\\\{guid}]\n"
-                entries = (
-                    f'"name"="Microsoft Edge WebView2 Runtime"\n'
-                    f'"pv"="{wv2_version}"\n'
-                    f'"location"="C:\\\\Program Files (x86)\\\\Microsoft\\\\EdgeWebView\\\\Application"\n'
-                )
-
-                modified = False
-                if client_sec not in content:
-                    content += f"\n{client_sec}{entries}\n"
-                    modified = True
-                if client_wow_sec not in content:
-                    content += f"\n{client_wow_sec}{entries}\n"
-                    modified = True
-                if modified:
-                    with open(reg_path, "w", encoding="utf-8") as f:
-                        f.write(content)
-            print(f"  -> Registered WebView2 Runtime v{wv2_version} in registry")
-
-        # 3. Configure WebView2 Policies for Wine stability
-        webview_policy = "[Software\\\\Policies\\\\Microsoft\\\\Edge\\\\WebView2]\n"
-        args_val = '"AdditionalBrowserArguments"="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"\n'
-        for reg_path in [user_reg, system_reg]:
-            if os.path.isfile(reg_path):
-                with open(reg_path, "r", encoding="utf-8", errors="ignore") as f:
-                    content = f.read()
-                if webview_policy not in content:
-                    content += f"\n{webview_policy}{args_val}\n"
-                    with open(reg_path, "w", encoding="utf-8") as f:
-                        f.write(content)
-        print("  -> Configured WebView2 compatibility flags in registry")
-
-    def purge_nsis_registry(self):
-        """Purge stale NSIS uninstall and app registry entries to allow clean reinstallation."""
-        for reg_file in ["user.reg", "system.reg"]:
-            reg_path = os.path.join(self.prefix_path, reg_file)
-            if not os.path.isfile(reg_path):
-                continue
-            with open(reg_path, "r", encoding="utf-8", errors="ignore") as f:
-                lines = f.readlines()
-            new_lines = []
-            skip = False
-            for line in lines:
-                if line.startswith('['):
-                    if 'Uninstall\\\\ok-ww' in line or 'Software\\\\ok-ww' in line:
-                        skip = True
-                    else:
-                        skip = False
-                if not skip:
-                    if 'c:\\\\proton_shortcuts\\\\ok-ww' not in line:
-                        new_lines.append(line)
-            with open(reg_path, "w", encoding="utf-8") as f:
-                f.writelines(new_lines)
-        print("  -> Purged stale NSIS uninstall registry entries")
-
     def apply_patches(self) -> bool:
         """Apply all compatibility patches idempotently with AST validation."""
         print(f"[*] Target Wine Prefix: {self.prefix_path}")
-        print("[1/5] Checking ICU DLL aliases...")
+        print("[1/4] Checking ICU DLL aliases...")
         self.fix_icu_dlls(revert=False)
-
-        print("[2/5] Configuring WebView2 runtime & compatibility registry...")
-        self.fix_webview2_registry(revert=False)
 
         if not self.site_packages:
             print("[WARN] Python site-packages directory not found in prefix.")
         else:
-            print(f"[3/5] Patching GUI framework packages in {self.site_packages}...")
+            print(f"[2/4] Patching GUI framework packages in {self.site_packages}...")
             self._patch_qframelesswindow()
             self._patch_qfluentwidgets()
 
         if not self.working_dir:
             print("[WARN] OK-WW working directory (main.py) not found in prefix.")
         else:
-            print(f"[4/5] Patching application modules in {self.working_dir}...")
+            print(f"[3/4] Patching application modules in {self.working_dir}...")
             self._patch_app_modules()
 
-        print("[5/5] Verifying patched files...")
+        print("[4/4] Verifying patched files...")
         return self.verify()
 
     def revert_patches(self) -> bool:
         """Revert all patches and restore pristine .orig files with corruption checking."""
         print(f"[*] Reverting patches in Wine Prefix: {self.prefix_path}")
         self.fix_icu_dlls(revert=True)
-        self.fix_webview2_registry(revert=True)
-        self.purge_nsis_registry()
 
         reverted_count = 0
         corrupted_count = 0
@@ -277,19 +166,14 @@ class PatchEngine:
                     icu_ok = False
         print(f"  [{'x' if icu_ok else ' '}] ICU DLL Aliases (system32/syswow64)")
 
-        # 2. WebView2 Registry
-        user_reg = os.path.join(self.prefix_path, "user.reg")
-        reg_ok = os.path.isfile(user_reg) and "Software\\\\Policies\\\\Microsoft\\\\Edge\\\\WebView2" in open(user_reg, "r", encoding="utf-8", errors="ignore").read()
-        print(f"  [{'x' if reg_ok else ' '}] WebView2 Compatibility Registry (user.reg)")
-
-        # 3. qframelesswindow
+        # 2. qframelesswindow
         if self.site_packages:
             wu_path = os.path.join(self.site_packages, "qframelesswindow", "utils", "win32_utils.py")
             is_patched = os.path.isfile(wu_path) and "is_wine" in open(wu_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(wu_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qframelesswindow (Mica/Glass bypass) [backup: {has_bak}]")
 
-            # 4. qfluentwidgets
+            # 3. qfluentwidgets
             fw_path = os.path.join(self.site_packages, "qfluentwidgets", "window", "fluent_window.py")
             is_patched = os.path.isfile(fw_path) and "is_wine" in open(fw_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(fw_path + ".orig")
@@ -298,7 +182,7 @@ class PatchEngine:
             print("  [ ] qframelesswindow (Python environment not installed)")
             print("  [ ] qfluentwidgets (Python environment not installed)")
 
-        # 5. App Modules
+        # 4. App Modules
         if self.working_dir:
             for mod_rel, marker, name in [
                 ("ok/util/window.py", "is_wine", "Window Capture & Exe Matching"),
@@ -605,7 +489,7 @@ class PatchEngine:
 def main():
     parser = argparse.ArgumentParser(description="Transactional Wine / Proton Compatibility Patcher for OK-WuWa")
     parser.add_argument("prefix", help="Path to Wine prefix or compatdata directory")
-    parser.add_argument("--revert", "--undo", action="store_true", help="Revert all patches, purge NSIS registry keys, and restore pristine original files")
+    parser.add_argument("--revert", "--undo", action="store_true", help="Revert all patches and restore pristine original files")
     parser.add_argument("--status", action="store_true", help="Show current patch status and backup existence")
     parser.add_argument("--verify", action="store_true", help="Validate syntax and integrity of all patched Python files")
 
