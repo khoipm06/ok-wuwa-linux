@@ -130,7 +130,7 @@ if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (comm
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     if command -v flatpak >/dev/null 2>&1; then
         echo "  -> Configuring Flatpak Steam permissions for wrapper..."
-        flatpak override --user --filesystem="${HOME}/.local/bin/ok-wuwa-steam-wrapper:ro" com.valvesoftware.Steam 2>/dev/null || true
+        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper:ro" com.valvesoftware.Steam 2>/dev/null || true
     fi
 fi
 
@@ -183,7 +183,7 @@ python3 "${SCRIPT_DIR}/patch_wine_compat.py" "${PFX_PATH}"
 
 # 6. Install Launchers & Conventional XDG Desktop Integration
 echo "[5/5] Installing launcher scripts and desktop integration..."
-mkdir -p "${HOME}/.local/bin" "${HOME}/.local/share/applications" "${HOME}/.local/share/icons/hicolor/256x256/apps"
+mkdir -p "${HOME}/.local/bin" "${HOME}/.local/share/applications" "${HOME}/.local/share/icons/hicolor/256x256/apps" "${HOME}/.local/share/ok-wuwa"
 
 ICON_SRC="${APP_DIR}/data/apps/ok-ww/working/icon.png"
 if [ -f "${ICON_SRC}" ]; then
@@ -193,11 +193,13 @@ if [ -f "${ICON_SRC}" ]; then
     fi
 fi
 
+cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
+chmod +x "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
+
+cp "${SCRIPT_DIR}/webview2_render_fix.py" "${PFX_PATH}/webview2_render_fix.py"
+
 cp "${SCRIPT_DIR}/ok-wuwa" "${HOME}/.local/bin/ok-wuwa"
 chmod +x "${HOME}/.local/bin/ok-wuwa"
-
-cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/bin/ok-wuwa-steam-wrapper"
-chmod +x "${HOME}/.local/bin/ok-wuwa-steam-wrapper"
 
 DESKTOP_PATH="${HOME}/.local/share/applications/ok-wuwa.desktop"
 cat << DESKTOP_EOF > "${DESKTOP_PATH}"
@@ -220,5 +222,5 @@ echo "    \`ok-wuwa\` in shell or launch from the desktop menu."
 echo ""
 echo " 2. (Optional) Run alongside Wuthering Waves via Steam Launch Options:"
 echo "    Steam -> Wuthering Waves -> Properties -> Launch Options:"
-echo "    ~/.local/bin/ok-wuwa-steam-wrapper %command%"
+echo "    ~/.local/share/ok-wuwa/ok-wuwa-steam-wrapper %command%"
 echo "=========================================================================="

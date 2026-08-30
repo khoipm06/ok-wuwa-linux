@@ -43,9 +43,9 @@ if [ -n "$PFX_PATH" ] && [ -d "$PFX_PATH" ]; then
 
     TARGET_EXE="${APP_DIR}/ok-ww.exe"
     TARGET_ARG=""
+    PYTHON_EXE="${APP_DIR}/data/apps/ok-ww/python/python.exe"
 
     if [ ! -f "${TARGET_EXE}" ]; then
-        PYTHON_EXE="${APP_DIR}/data/apps/ok-ww/python/python.exe"
         MAIN_PY="${APP_DIR}/data/apps/ok-ww/working/main.py"
         if [ -f "${PYTHON_EXE}" ] && [ -f "${MAIN_PY}" ]; then
             TARGET_EXE="${PYTHON_EXE}"
@@ -67,19 +67,31 @@ if [ -n "$PFX_PATH" ] && [ -d "$PFX_PATH" ]; then
         fi
     done
 
-    WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
+    RENDER_FIX_WIN=""
+    if [ "${TARGET_EXE}" = "${APP_DIR}/ok-ww.exe" ] && [ -f "${PFX_PATH}/webview2_render_fix.py" ]; then
+        RENDER_FIX_WIN="Z:$(printf '%s' "${PFX_PATH}/webview2_render_fix.py" | sed 's|/|\\|g')"
+    fi
+
+    export OKWW_PROTON="${PROTON_BIN:-}"
+    export OKWW_TARGET="${TARGET_EXE}"
+    export OKWW_PYTHON="${PYTHON_EXE}"
+    export OKWW_FIX="${RENDER_FIX_WIN}"
+    export OKWW_ARGS="${TARGET_ARG}"
+    INNER='if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS; fi
+"$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS &
+"$OKWW_PROTON" runinprefix "$OKWW_PYTHON" "$OKWW_FIX"
+wait'
 
     if [ -f "${TARGET_EXE}" ]; then
         (
-            sleep 4
             [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-            export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
             if [ -n "${PROTON_BIN:-}" ] && [ -x "${PROTON_BIN}" ]; then
-                "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >/dev/null 2>&1 &
+                bash -c "$INNER" >/dev/null 2>&1 &
             elif [ -n "${STEAM_COMPAT_TOOL_PATHS:-}" ]; then
                 PROTON_TOOL=$(echo "${STEAM_COMPAT_TOOL_PATHS}" | tr ':' '\n' | head -n 1)
                 if [ -f "${PROTON_TOOL}/proton" ]; then
-                    "${PROTON_TOOL}/proton" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} >/dev/null 2>&1 &
+                    export OKWW_PROTON="${PROTON_TOOL}/proton"
+                    bash -c "$INNER" >/dev/null 2>&1 &
                 fi
             fi
         ) &

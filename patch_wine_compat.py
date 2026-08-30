@@ -71,56 +71,28 @@ class PatchEngine:
         with open(target_path, "r", encoding="utf-8") as f:
             return f.read()
 
-    def fix_icu_dlls(self, revert: bool = False):
-        """Handle ICU DLL aliases in Wine system directories."""
-        drive_c = os.path.join(self.prefix_path, "drive_c", "windows")
-        for subdir in ["system32", "syswow64"]:
-            dir_path = os.path.join(drive_c, subdir)
-            if not os.path.isdir(dir_path):
-                continue
-
-            for target_name in ["icuuc.dll", "icuin.dll"]:
-                target_path = os.path.join(dir_path, target_name)
-                if revert:
-                    if os.path.islink(target_path) or os.path.isfile(target_path):
-                        try:
-                            os.remove(target_path)
-                            print(f"  -> Removed alias {subdir}/{target_name}")
-                        except Exception:
-                            pass
-                else:
-                    icu_src = os.path.join(dir_path, "icu.dll")
-                    if os.path.isfile(icu_src) and not os.path.exists(target_path):
-                        shutil.copy2(icu_src, target_path)
-                        print(f"  -> Created {subdir}/{target_name}")
-
     def apply_patches(self) -> bool:
         """Apply all compatibility patches idempotently with AST validation."""
         print(f"[*] Target Wine Prefix: {self.prefix_path}")
-        print("[1/4] Checking ICU DLL aliases...")
-        self.fix_icu_dlls(revert=False)
-
         if not self.site_packages:
             print("[WARN] Python site-packages directory not found in prefix.")
         else:
-            print(f"[2/4] Patching GUI framework packages in {self.site_packages}...")
+            print(f"[1/3] Patching GUI framework packages in {self.site_packages}...")
             self._patch_qframelesswindow()
             self._patch_qfluentwidgets()
 
         if not self.working_dir:
             print("[WARN] OK-WW working directory (main.py) not found in prefix.")
         else:
-            print(f"[3/4] Patching application modules in {self.working_dir}...")
+            print(f"[2/3] Patching application modules in {self.working_dir}...")
             self._patch_app_modules()
 
-        print("[4/4] Verifying patched files...")
+        print("[3/3] Verifying patched files...")
         return self.verify()
 
     def revert_patches(self) -> bool:
         """Revert all patches and restore pristine .orig files with corruption checking."""
         print(f"[*] Reverting patches in Wine Prefix: {self.prefix_path}")
-        self.fix_icu_dlls(revert=True)
-
         reverted_count = 0
         corrupted_count = 0
         users_dir = os.path.join(self.prefix_path, "drive_c", "users")
@@ -157,23 +129,14 @@ class PatchEngine:
         print(f"  -> Working Dir:   {self.working_dir or 'Not Found'}")
         print("\n--- Patch Status Checklist ---")
 
-        # 1. ICU DLLs
-        icu_ok = True
-        for sub in ["system32", "syswow64"]:
-            for name in ["icuuc.dll", "icuin.dll"]:
-                p = os.path.join(self.prefix_path, "drive_c", "windows", sub, name)
-                if not os.path.exists(p):
-                    icu_ok = False
-        print(f"  [{'x' if icu_ok else ' '}] ICU DLL Aliases (system32/syswow64)")
-
-        # 2. qframelesswindow
+        # 1. qframelesswindow
         if self.site_packages:
             wu_path = os.path.join(self.site_packages, "qframelesswindow", "utils", "win32_utils.py")
             is_patched = os.path.isfile(wu_path) and "is_wine" in open(wu_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(wu_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qframelesswindow (Mica/Glass bypass) [backup: {has_bak}]")
 
-            # 3. qfluentwidgets
+            # 2. qfluentwidgets
             fw_path = os.path.join(self.site_packages, "qfluentwidgets", "window", "fluent_window.py")
             is_patched = os.path.isfile(fw_path) and "is_wine" in open(fw_path, "r", encoding="utf-8").read()
             has_bak = os.path.isfile(fw_path + ".orig")
@@ -182,7 +145,7 @@ class PatchEngine:
             print("  [ ] qframelesswindow (Python environment not installed)")
             print("  [ ] qfluentwidgets (Python environment not installed)")
 
-        # 4. App Modules
+        # 3. App Modules
         if self.working_dir:
             for mod_rel, marker, name in [
                 ("ok/util/window.py", "is_wine", "Window Capture & Exe Matching"),

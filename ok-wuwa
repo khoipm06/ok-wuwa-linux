@@ -140,28 +140,48 @@ for check_path in "${PFX_PATH}/drive_c/Program Files (x86)/Microsoft/EdgeWebView
     fi
 done
 
-WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
+# 7. WebView2 render-fix: the launcher (ok-ww.exe) needs a >=2px resize after
+#    startup or Chromium never presents its first frame (blank white window).
+#    Both processes must share one wineserver, so the render-fix helper runs in
+#    the same process tree as the app (same container). Direct/python modes
+#    have no webview and skip the fix.
+RENDER_FIX_WIN=""
+if [ "$TARGET_EXE" = "${LAUNCHER_EXE}" ]; then
+    RENDER_FIX_SCRIPT="${PFX_PATH}/webview2_render_fix.py"
+    if [ -f "$RENDER_FIX_SCRIPT" ]; then
+        RENDER_FIX_WIN="Z:$(printf '%s' "${RENDER_FIX_SCRIPT}" | sed 's|/|\\|g')"
+    else
+        echo "Warning: WebView2 render-fix helper not installed in prefix; run setup.sh." >&2
+    fi
+fi
 
-# 7. Execute OK-WuWa inside the Steam Linux Runtime container
+export OKWW_PROTON="${PROTON_BIN}"
+export OKWW_TARGET="${TARGET_EXE}"
+export OKWW_PYTHON="${PYTHON_EXE}"
+export OKWW_FIX="${RENDER_FIX_WIN}"
+export OKWW_ARGS="${TARGET_ARG:+${TARGET_ARG} }$*"
+INNER='if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS; fi
+"$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS &
+"$OKWW_PROTON" runinprefix "$OKWW_PYTHON" "$OKWW_FIX"
+wait'
+
+# 8. Execute OK-WuWa inside the Steam Linux Runtime container
 if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
         --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
         ${WV2_DIR:+--env=WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"} \
-        --env=WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}" \
         --command="${ENTRY_POINT}" \
         com.valvesoftware.Steam \
-        --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
+        --verb=runinprefix -- bash -c "$INNER"
 elif [ -n "${ENTRY_POINT}" ]; then
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
     [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
-    exec "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
+    exec "${ENTRY_POINT}" --verb=runinprefix -- bash -c "$INNER"
 else
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
     [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
-    exec "${PROTON_BIN}" run "${TARGET_EXE}" ${TARGET_ARG:+"$TARGET_ARG"} "$@"
+    exec bash -c "$INNER"
 fi
