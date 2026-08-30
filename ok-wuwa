@@ -4,7 +4,7 @@ set -e
 APP_ID="3513350"
 APP_NAME="OK-WuWa"
 
-# 1. Discover Steam library folders
+# 1. Discover Steam library paths from libraryfolders.vdf
 VDF_CANDIDATES=(
     "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
     "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
@@ -25,7 +25,6 @@ for vdf in "${VDF_CANDIDATES[@]}"; do
     fi
 done
 
-# Deduplicate
 if [ ${#STEAM_LIBS[@]} -gt 0 ]; then
     readarray -t STEAM_LIBS < <(printf '%s\n' "${STEAM_LIBS[@]}" | sort -u)
 fi
@@ -38,17 +37,23 @@ for lib in "${STEAM_LIBS[@]}"; do
 done
 
 if [ -z "$PFX_PATH" ]; then
-    PFX_PATH=$(find /var/mnt /mnt /run/media "${HOME}" -path "*/steamapps/compatdata/${APP_ID}/pfx" -type d 2>/dev/null | head -n 1 || true)
+    SEARCH_ROOTS=()
+    for root in "/var/mnt" "/mnt" "/media" "/run/media/${USER}" "${HOME}"; do
+        [ -d "$root" ] && SEARCH_ROOTS+=("$root")
+    done
+    if [ ${#SEARCH_ROOTS[@]} -gt 0 ]; then
+        PFX_PATH=$(find "${SEARCH_ROOTS[@]}" -maxdepth 5 -path "*/steamapps/compatdata/${APP_ID}/pfx" -type d 2>/dev/null | head -n 1 || true)
+    fi
 fi
 
 if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
-    echo "Error: Prefix for App ID ${APP_ID} not found. Please launch Wuthering Waves once via Steam first." >&2
+    echo "Error: Prefix for App ID ${APP_ID} not found. Launch Wuthering Waves once in Steam first." >&2
     exit 1
 fi
 
 COMPAT_DATA_PATH="$(dirname "${PFX_PATH}")"
 
-# 3. Locate Steam Linux Runtime container entry point (_v2-entry-point)
+# 3. Locate Steam Linux Runtime container entry point
 ENTRY_POINT=""
 for lib in "${STEAM_LIBS[@]}"; do
     cand=$(find "${lib}/steamapps/common" -maxdepth 3 -name "_v2-entry-point" -type f -perm -111 2>/dev/null | sort -V | tail -n 1 || true)
@@ -83,19 +88,7 @@ if [ -z "$PROTON_BIN" ]; then
     done
 fi
 
-# 5. Ensure ICU DLL aliases in Wine system directories
-SYSTEM32="${PFX_PATH}/drive_c/windows/system32"
-SYSWOW64="${PFX_PATH}/drive_c/windows/syswow64"
-if [ -f "${SYSTEM32}/icu.dll" ]; then
-    [ ! -f "${SYSTEM32}/icuuc.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuuc.dll" 2>/dev/null || true
-    [ ! -f "${SYSTEM32}/icuin.dll" ] && cp "${SYSTEM32}/icu.dll" "${SYSTEM32}/icuin.dll" 2>/dev/null || true
-fi
-if [ -f "${SYSWOW64}/icu.dll" ]; then
-    [ ! -f "${SYSWOW64}/icuuc.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuuc.dll" 2>/dev/null || true
-    [ ! -f "${SYSWOW64}/icuin.dll" ] && cp "${SYSWOW64}/icu.dll" "${SYSWOW64}/icuin.dll" 2>/dev/null || true
-fi
-
-# 6. Check if Flatpak Steam is used
+# 5. Check if Flatpak Steam is used
 IS_FLATPAK=false
 STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
 if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
@@ -103,7 +96,7 @@ if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (comm
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
 fi
 
-# 7. Locate OK-WW application directory inside prefix
+# 6. Locate OK-WW application directory inside prefix
 APP_DIR=""
 for u in "steamuser" "${USER}" "default" "steamuser"; do
     cand="${PFX_PATH}/drive_c/users/${u}/AppData/Local/ok-ww"
@@ -118,7 +111,6 @@ LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
 
 export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="--disable-gpu --no-sandbox --disable-direct-composition --disable-gpu-compositing --disable-features=TouchEvents,TouchSelectionStrategy"
 
-# Default to the official main launcher (ok-ww.exe)
 TARGET_EXE="${LAUNCHER_EXE}"
 TARGET_ARG=""
 
@@ -128,7 +120,7 @@ if [ "$1" = "--direct" ] || [ "$1" = "--python" ] || [ ! -f "${PFX_PATH}/drive_c
     [ "$1" = "--direct" ] || [ "$1" = "--python" ] && shift
 fi
 
-# 8. Execute OK-WuWa inside the Steam Linux Runtime container
+# 7. Execute OK-WuWa inside the Steam Linux Runtime container
 if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
