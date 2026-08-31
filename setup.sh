@@ -77,9 +77,6 @@ fi
 echo "  -> Found Prefix: ${PFX_PATH}"
 COMPAT_DATA_PATH="$(dirname "${PFX_PATH}")"
 
-# Clean up any legacy scripts from prefix
-rm -f "${COMPAT_DATA_PATH}/ok-wuwa-steam-wrapper.sh" "${HOME}/.var/app/com.valvesoftware.Steam/ok-wuwa-steam-wrapper.sh"
-
 # 3. Detect Proton Runner & Container Entry Point
 echo "[3/5] Detecting installed Proton runner & container..."
 ENTRY_POINT=""
@@ -130,7 +127,7 @@ if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (comm
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     if command -v flatpak >/dev/null 2>&1; then
         echo "  -> Configuring Flatpak Steam permissions for wrapper..."
-        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper:ro" com.valvesoftware.Steam 2>/dev/null || true
+        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa/steam-wrapper.sh:ro" com.valvesoftware.Steam 2>/dev/null || true
     fi
 fi
 
@@ -193,12 +190,12 @@ if [ -f "${ICON_SRC}" ]; then
     fi
 fi
 
-cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
-chmod +x "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
+cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/share/ok-wuwa/steam-wrapper.sh"
+chmod +x "${HOME}/.local/share/ok-wuwa/steam-wrapper.sh"
 
-cp "${SCRIPT_DIR}/cursor_visible.py" "${HOME}/.local/bin/cursor_visible.py"
+cp "${SCRIPT_DIR}/cursor_visible.py" "${HOME}/.local/share/ok-wuwa/cursor_visible.py"
 
-cp "${SCRIPT_DIR}/webview2_render_fix.py" "${PFX_PATH}/webview2_render_fix.py"
+cp "${SCRIPT_DIR}/webview2_render_fix.py" "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py"
 
 cp "${SCRIPT_DIR}/ok-wuwa" "${HOME}/.local/bin/ok-wuwa"
 chmod +x "${HOME}/.local/bin/ok-wuwa"
@@ -224,5 +221,5 @@ echo "    \`ok-wuwa\` in shell or launch from the desktop menu."
 echo ""
 echo " 2. (Optional) Run alongside Wuthering Waves via Steam Launch Options:"
 echo "    Steam -> Wuthering Waves -> Properties -> Launch Options:"
-echo "    ~/.local/share/ok-wuwa/ok-wuwa-steam-wrapper %command%"
+echo "    ~/.local/share/ok-wuwa/steam-wrapper.sh %command%"
 echo "=========================================================================="

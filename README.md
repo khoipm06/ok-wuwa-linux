@@ -41,7 +41,7 @@ To start OK-WuWa automatically whenever you launch Wuthering Waves from Steam:
 1. Open Steam, right-click **Wuthering Waves**, and select **Properties**.
 2. Set **Launch Options** to:
    ```bash
-   ~/.local/bin/ok-wuwa-steam-wrapper %command%
+   ~/.local/bin/steam-wrapper.sh %command%
    ```
 
 ## Patch Management
