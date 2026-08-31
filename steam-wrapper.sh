@@ -68,8 +68,8 @@ if [ -n "$PFX_PATH" ] && [ -d "$PFX_PATH" ]; then
     done
 
     RENDER_FIX_WIN=""
-    if [ "${TARGET_EXE}" = "${APP_DIR}/ok-ww.exe" ] && [ -f "${PFX_PATH}/webview2_render_fix.py" ]; then
-        RENDER_FIX_WIN="Z:$(printf '%s' "${PFX_PATH}/webview2_render_fix.py" | sed 's|/|\\|g')"
+    if [ "${TARGET_EXE}" = "${APP_DIR}/ok-ww.exe" ] && [ -f "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py" ]; then
+        RENDER_FIX_WIN="Z:$(printf '%s' "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py" | sed 's|/|\\|g')"
     fi
 
     export OKWW_PROTON="${PROTON_BIN:-}"

@@ -196,6 +196,8 @@ fi
 cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
 chmod +x "${HOME}/.local/share/ok-wuwa/ok-wuwa-steam-wrapper"
 
+cp "${SCRIPT_DIR}/cursor_visible.py" "${HOME}/.local/bin/cursor_visible.py"
+
 cp "${SCRIPT_DIR}/webview2_render_fix.py" "${PFX_PATH}/webview2_render_fix.py"
 
 cp "${SCRIPT_DIR}/ok-wuwa" "${HOME}/.local/bin/ok-wuwa"

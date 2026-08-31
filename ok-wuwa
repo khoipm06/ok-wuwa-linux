@@ -145,13 +145,20 @@ done
 #    Both processes must share one wineserver, so the render-fix helper runs in
 #    the same process tree as the app (same container). Direct/python modes
 #    have no webview and skip the fix.
+RESOURCE_DIR=""
+for cand in "${SCRIPT_DIR}" "${HOME}/.local/share/ok-wuwa"; do
+    if [ -f "$cand/cursor_visible.py" ] && [ -f "$cand/webview2_render_fix.py" ]; then
+        RESOURCE_DIR="$cand"
+        break
+    fi
+done
+
 RENDER_FIX_WIN=""
 if [ "$TARGET_EXE" = "${LAUNCHER_EXE}" ]; then
-    RENDER_FIX_SCRIPT="${PFX_PATH}/webview2_render_fix.py"
-    if [ -f "$RENDER_FIX_SCRIPT" ]; then
-        RENDER_FIX_WIN="Z:$(printf '%s' "${RENDER_FIX_SCRIPT}" | sed 's|/|\\|g')"
+    if [ -n "$RESOURCE_DIR" ] && [ -f "${RESOURCE_DIR}/webview2_render_fix.py" ]; then
+        RENDER_FIX_WIN="Z:$(printf '%s' "${RESOURCE_DIR}/webview2_render_fix.py" | sed 's|/|\\|g')"
     else
-        echo "Warning: WebView2 render-fix helper not installed in prefix; run setup.sh." >&2
+        echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
     fi
 fi
 
@@ -165,7 +172,14 @@ INNER='if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET
 "$OKWW_PROTON" runinprefix "$OKWW_PYTHON" "$OKWW_FIX"
 wait'
 
-# 8. Execute OK-WuWa inside the Steam Linux Runtime container
+# 8. Execute OK-WuWa inside the Steam Linux Runtime container.
+#    The cursor watcher (host-side) defines a theme cursor on the ok-ww
+#    window so KWin shows the mouse cursor over it (KWin renders no cursor
+#    over cursor-less XWayland windows).
+if [ -n "$RESOURCE_DIR" ] && [ -f "${RESOURCE_DIR}/cursor_visible.py" ]; then
+    ( python3 "${RESOURCE_DIR}/cursor_visible.py" >/dev/null 2>&1 & ) 2>/dev/null || true
+fi
+
 if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
     exec flatpak run \
         --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
