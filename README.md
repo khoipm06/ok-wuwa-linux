@@ -17,8 +17,6 @@ cd ok-wuwa-proton
 ```
 
 The script locates your Steam libraries, applies Wine compatibility fixes to the prefix, and installs the desktop launcher.
-> [!NOTE]
-> Keep ok-wuwa installed in the default location, as the script is hardcoded to find it there.
 
 ## Usage
 
@@ -34,6 +32,12 @@ From here you can:
 - Start OK-WuWa, then click **Start** in the UI to launch Wuthering Waves. (Or enable the auto-start option in the settings.)
 - Start Wuthering Waves in Steam first, then launch OK-WuWa.
 
+To bypass the Tauri launcher and run the Python app directly (no WebView2 involved):
+
+```bash
+ok-wuwa --direct
+```
+
 ### Optional: 1-Click Steam Integration
 
 To start OK-WuWa automatically whenever you launch Wuthering Waves from Steam:
@@ -41,7 +45,7 @@ To start OK-WuWa automatically whenever you launch Wuthering Waves from Steam:
 1. Open Steam, right-click **Wuthering Waves**, and select **Properties**.
 2. Set **Launch Options** to:
    ```bash
-   ~/.local/bin/steam-wrapper.sh %command%
+   ~/.local/share/ok-wuwa/steam-wrapper.sh %command%
    ```
 
 ## Patch Management
@@ -62,6 +66,9 @@ python3 patch_wine_compat.py /path/to/prefix --revert
 ## Structure
 
 - `setup.sh`: Automated setup, git auto-updater, and prefix patcher.
+- `common.sh`: Shared routines used by every launcher and wrapper (Steam library/prefix/Proton discovery, WebView2 detection, render-fix, cursor watcher, compat patches).
 - `ok-wuwa`: Standalone desktop launcher for `ok-ww.exe`.
-- `steam-wrapper.sh`: Companion wrapper for Steam launch options.
+- `steam-wrapper.sh`: Companion wrapper for Steam launch options; applies the same fixes as `ok-wuwa`.
 - `patch_wine_compat.py`: Safe, reversible Wine patch engine with AST validation.
+- `cursor_visible.py`: Host-side watcher that restores the mouse cursor over the ok-ww window on KWin/XWayland.
+- `webview2_render_fix.py`: In-prefix helper that kicks WebView2/Chromium into presenting its first frame on Wine.
