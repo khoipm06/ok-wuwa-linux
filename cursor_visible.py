@@ -10,7 +10,6 @@ this watcher re-defines whenever the window id changes.
 """
 import ctypes
 import ctypes.util
-import subprocess
 import sys
 import time
 
@@ -27,6 +26,14 @@ x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
 x11.XSync.restype = ctypes.c_int
 x11.XDefineCursor.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong]
 x11.XDefineCursor.restype = ctypes.c_int
+x11.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong),
+                           ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)),
+                           ctypes.POINTER(ctypes.c_uint)]
+x11.XQueryTree.restype = ctypes.c_int
+x11.XFree.argtypes = [ctypes.c_void_p]
+x11.XFree.restype = ctypes.c_int
+x11.XFetchName.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_char_p)]
+x11.XFetchName.restype = ctypes.c_int
 xcursor.XcursorLibraryLoadCursor.argtypes = [ctypes.c_void_p, ctypes.c_char_p]
 xcursor.XcursorLibraryLoadCursor.restype = ctypes.c_ulong
 
@@ -34,17 +41,28 @@ TIMEOUT = 180
 GONE_EXIT = 30
 
 
-def find_okww_window():
-    out = subprocess.run(["xprop", "-display", ":0", "-root", "_NET_CLIENT_LIST"],
-                         capture_output=True, text=True).stdout
-    for w in out.replace("_NET_CLIENT_LIST(WINDOW):", "").replace("window id #", "").split():
-        w = w.strip().strip(",")
-        if not w.startswith("0x"):
-            continue
-        n = subprocess.run(["xprop", "-display", ":0", "-id", w, "WM_NAME"],
-                           capture_output=True, text=True).stdout
-        if '"ok-ww"' in n:
-            return int(w, 16)
+def find_okww_window(dpy):
+    # No xprop: the Steam flatpak sandbox ships no xprop binary.
+    root = x11.XDefaultRootWindow(dpy)
+    rroot = ctypes.c_ulong()
+    rparent = ctypes.c_ulong()
+    children = ctypes.POINTER(ctypes.c_ulong)()
+    nchildren = ctypes.c_uint()
+    if not x11.XQueryTree(dpy, root, ctypes.byref(rroot), ctypes.byref(rparent),
+                          ctypes.byref(children), ctypes.byref(nchildren)):
+        return 0
+    try:
+        for i in range(nchildren.value):
+            win = children[i]
+            name = ctypes.c_char_p()
+            if x11.XFetchName(dpy, win, ctypes.byref(name)):
+                try:
+                    if name.value and b"ok-ww" in name.value:
+                        return win
+                finally:
+                    x11.XFree(name)
+    finally:
+        x11.XFree(children)
     return 0
 
 
@@ -60,7 +78,7 @@ def main():
     last_win = 0
     gone_since = 0
     while True:
-        win = find_okww_window()
+        win = find_okww_window(dpy)
         if win:
             gone_since = 0
             if win != last_win:
