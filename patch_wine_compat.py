@@ -155,6 +155,8 @@ class PatchEngine:
                 ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
                 ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
                 ("ok/ui/qt/about/UpdateCard.py", "not self.pyappify_app_version", "PyAppify Update Loop Silence"),
+                ("ok/ui/qt/start/StartCard.py", "UnregisterHotKey(hwnd, 999)", "Start Hotkey Window Binding"),
+                ("ok/ui/qt/debug/DebugTab.py", "UnregisterHotKey(hwnd, 1)", "Debug Hotkey Window Binding"),
             ]:
                 p = os.path.join(self.working_dir, mod_rel)
                 is_patched = os.path.isfile(p) and marker in open(p, "r", encoding="utf-8").read()
@@ -179,7 +181,7 @@ class PatchEngine:
                         errors += 1
 
         if self.working_dir:
-            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/about/UpdateCard.py"]:
+            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/about/UpdateCard.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
                 p = os.path.join(self.working_dir, sub)
                 if os.path.isfile(p):
                     checked += 1
@@ -447,6 +449,46 @@ class PatchEngine:
             )
             if self._safe_write_python(uc_path, content):
                 print("  -> Patched ok/ui/qt/about/UpdateCard.py")
+
+        # 8. StartCard.py - bind hotkey to the widget's own window so
+        #    RegisterHotKey/UnregisterHotKey stay symmetric (Wine leaks
+        #    hotkeys registered to NULL after the widget is destroyed).
+        sc_path = os.path.join(self.working_dir, "ok", "ui", "qt", "start", "StartCard.py")
+        content = self._get_pristine_content(sc_path)
+        if content:
+            self._ensure_backup(sc_path)
+            content = content.replace(
+                "        windll.user32.UnregisterHotKey(None, 999)",
+                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        windll.user32.UnregisterHotKey(hwnd, 999)"
+            )
+            content = content.replace(
+                "            if not windll.user32.RegisterHotKey(None, 999, 0, vk_map[hotkey]):",
+                "            hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n            if not windll.user32.RegisterHotKey(hwnd, 999, 0, vk_map[hotkey]):"
+            )
+            if self._safe_write_python(sc_path, content):
+                print("  -> Patched ok/ui/qt/start/StartCard.py")
+
+        # 9. DebugTab.py - same hotkey window binding, with symmetric
+        #    unregister (registering with a window handle but unregistering
+        #    with NULL leaves the hotkey registered on Wine).
+        dt_path = os.path.join(self.working_dir, "ok", "ui", "qt", "debug", "DebugTab.py")
+        content = self._get_pristine_content(dt_path)
+        if content:
+            self._ensure_backup(dt_path)
+            content = content.replace(
+                "        if not windll.user32.RegisterHotKey(None, 1, MOD_ALT | MOD_CONTROL, VK_D):",
+                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        if not windll.user32.RegisterHotKey(hwnd, 1, MOD_ALT | MOD_CONTROL, VK_D):"
+            )
+            content = content.replace(
+                "        if not windll.user32.RegisterHotKey(None, 2, MOD_ALT | MOD_CONTROL, VK_S):",
+                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        if not windll.user32.RegisterHotKey(hwnd, 2, MOD_ALT | MOD_CONTROL, VK_S):"
+            )
+            content = content.replace(
+                "        windll.user32.UnregisterHotKey(None, 1)\n        windll.user32.UnregisterHotKey(None, 2)",
+                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        windll.user32.UnregisterHotKey(hwnd, 1)\n        windll.user32.UnregisterHotKey(hwnd, 2)"
+            )
+            if self._safe_write_python(dt_path, content):
+                print("  -> Patched ok/ui/qt/debug/DebugTab.py")
 
 
 def main():
