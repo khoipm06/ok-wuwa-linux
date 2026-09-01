@@ -1,99 +1,64 @@
 #!/usr/bin/env bash
 # Steam Launch Option Companion for OK-WuWa
+# Usage (Steam -> Wuthering Waves -> Properties -> Launch Options):
+#   ~/.local/share/ok-wuwa/steam-wrapper.sh %command%
 
 set -e
 
-APP_ID="3513350"
-APP_NAME="OK-WuWa"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-PFX_PATH="${STEAM_COMPAT_DATA_PATH:-""}"
-if [ -n "$PFX_PATH" ] && [ -d "${PFX_PATH}/pfx" ]; then
-    PFX_PATH="${PFX_PATH}/pfx"
+# Source shared helpers (from this checkout, or the installed share dir)
+if [ -f "${SCRIPT_DIR}/common.sh" ]; then
+    source "${SCRIPT_DIR}/common.sh"
+elif [ -f "${HOME}/.local/share/ok-wuwa/common.sh" ]; then
+    source "${HOME}/.local/share/ok-wuwa/common.sh"
+else
+    echo "Error: common.sh not found. Run setup.sh first." >&2
+    exit 1
 fi
 
-if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
-    VDF_CANDIDATES=(
-        "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
-        "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
-        "${HOME}/.local/share/Steam/steamapps/libraryfolders.vdf"
-        "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/libraryfolders.vdf"
-        "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"
-    )
-    for vdf in "${VDF_CANDIDATES[@]}"; do
-        if [ -f "$vdf" ]; then
-            while IFS= read -r line; do
-                if [[ "$line" =~ \"path\"[[:space:]]+\"([^\"]+)\" ]]; then
-                    cand="${BASH_REMATCH[1]}/steamapps/compatdata/${APP_ID}/pfx"
-                    [ -d "$cand" ] && { PFX_PATH="$cand"; break 2; }
-                fi
-            done < "$vdf"
-        fi
-    done
+okww_find_resource_dir "${SCRIPT_DIR}"
+steam_discover_libs
+
+# Steam provides STEAM_COMPAT_DATA_PATH; fall back to library scan when the
+# wrapper is invoked manually (e.g. testing) without Steam's environment.
+if ! steam_find_prefix; then
+    exec "$@"
 fi
 
-if [ -n "$PFX_PATH" ] && [ -d "$PFX_PATH" ]; then
-    APP_DIR=""
-    if [ -d "${PFX_PATH}/drive_c/users" ]; then
-        for u_dir in "${PFX_PATH}/drive_c/users"/*; do
-            cand="${u_dir}/AppData/Local/ok-ww"
-            [ -d "$cand" ] && { APP_DIR="$cand"; break; }
-        done
-    fi
-    [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
+okww_find_app_dir
+okww_apply_patches
+okww_resolve_targets ""
 
-    TARGET_EXE="${APP_DIR}/ok-ww.exe"
-    TARGET_ARG=""
-    PYTHON_EXE="${APP_DIR}/data/apps/ok-ww/python/python.exe"
+# Detect installed WebView2 Runtime path
+okww_detect_wv2 || true
+okww_get_render_fix_win
+if [ -z "${RENDER_FIX_WIN}" ] && [ "${TARGET_EXE}" = "${LAUNCHER_WIN}" ]; then
+    echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
+fi
 
-    if [ ! -f "${TARGET_EXE}" ]; then
-        MAIN_PY="${APP_DIR}/data/apps/ok-ww/working/main.py"
-        if [ -f "${PYTHON_EXE}" ] && [ -f "${MAIN_PY}" ]; then
-            TARGET_EXE="${PYTHON_EXE}"
-            TARGET_ARG="${MAIN_PY}"
-        fi
-    fi
+# Proton runner: prefer Steam's tool paths, then compatibilitytools.d scan.
+steam_find_proton || true
 
-    # Detect installed WebView2 Runtime path
-    WV2_DIR=""
-    for check_path in "${PFX_PATH}/drive_c/Program Files (x86)/Microsoft/EdgeWebView/Application" "${PFX_PATH}/drive_c/Program Files/Microsoft/EdgeWebView/Application"; do
-        if [ -d "$check_path" ]; then
-            for v_dir in "$check_path"/*; do
-                if [ -d "$v_dir" ] && [ -f "${v_dir}/msedgewebview2.exe" ]; then
-                    v_name="$(basename "$v_dir")"
-                    WV2_DIR="C:\\Program Files (x86)\\Microsoft\\EdgeWebView\\Application\\${v_name}"
-                    break 2
-                fi
-            done
-        fi
-    done
+export OKWW_PROTON="${PROTON_BIN}"
+export OKWW_TARGET="${TARGET_EXE}"
+export OKWW_PYTHON="${PYTHON_WIN}"
+export OKWW_FIX="${RENDER_FIX_WIN}"
+export OKWW_ARGS="${TARGET_ARG}"
+INNER="$(okww_build_inner_cmd)"
 
-    RENDER_FIX_WIN=""
-    if [ "${TARGET_EXE}" = "${APP_DIR}/ok-ww.exe" ] && [ -f "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py" ]; then
-        RENDER_FIX_WIN="Z:$(printf '%s' "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py" | sed 's|/|\\|g')"
-    fi
+# Host-side cursor watcher: KWin renders no cursor over cursor-less XWayland
+# windows; define the theme cursor on the ok-ww window when it appears.
+okww_start_cursor_fix
 
-    export OKWW_PROTON="${PROTON_BIN:-}"
-    export OKWW_TARGET="${TARGET_EXE}"
-    export OKWW_PYTHON="${PYTHON_EXE}"
-    export OKWW_FIX="${RENDER_FIX_WIN}"
-    export OKWW_ARGS="${TARGET_ARG}"
-    INNER='if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS; fi
-"$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS &
-"$OKWW_PROTON" runinprefix "$OKWW_PYTHON" "$OKWW_FIX"
-wait'
-
-    if [ -f "${TARGET_EXE}" ]; then
+# Launch OK-WuWa alongside the game. Both processes must share one wineserver,
+# so the render-fix helper runs in the same process tree (same container).
+# If no Proton runner is resolvable, skip silently - the game still launches.
+if [ -n "${PROTON_BIN}" ]; then
+    if [ -f "${APP_DIR}/ok-ww.exe" ] || { [ -f "${APP_DIR}/data/apps/ok-ww/python/python.exe" ] && [ -f "${APP_DIR}/data/apps/ok-ww/working/main.py" ]; }; then
         (
             [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-            if [ -n "${PROTON_BIN:-}" ] && [ -x "${PROTON_BIN}" ]; then
-                bash -c "$INNER" >/dev/null 2>&1 &
-            elif [ -n "${STEAM_COMPAT_TOOL_PATHS:-}" ]; then
-                PROTON_TOOL=$(echo "${STEAM_COMPAT_TOOL_PATHS}" | tr ':' '\n' | head -n 1)
-                if [ -f "${PROTON_TOOL}/proton" ]; then
-                    export OKWW_PROTON="${PROTON_TOOL}/proton"
-                    bash -c "$INNER" >/dev/null 2>&1 &
-                fi
-            fi
+            bash -c "$INNER" >/dev/null 2>&1 &
         ) &
     fi
 fi
