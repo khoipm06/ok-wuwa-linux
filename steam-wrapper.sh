@@ -30,6 +30,14 @@ okww_find_app_dir
 okww_apply_patches
 okww_resolve_targets ""
 
+# Manual invocation only: overwriting Steam's per-game env would break
+# the attached game's prefix.
+if [ -z "${STEAM_COMPAT_DATA_PATH:-}" ]; then
+    steam_check_flatpak
+    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+fi
+
 # Detect installed WebView2 Runtime path
 okww_detect_wv2 || true
 okww_get_render_fix_win
