@@ -212,7 +212,7 @@ class PatchEngine:
         checked = 0
         for site_packages, working_dir in self.trees:
             if site_packages:
-                for sub in ["qframelesswindow/utils/win32_utils.py", "qframelesswindow/windows/window_effect.py", "qfluentwidgets/window/fluent_window.py"]:
+                for sub in ["qframelesswindow/utils/win32_utils.py", "qfluentwidgets/window/fluent_window.py"]:
                     p = os.path.join(site_packages, sub)
                     if os.path.isfile(p):
                         checked += 1
@@ -261,29 +261,6 @@ class PatchEngine:
                 "win32_utils isGreaterEqualWin11 guard")
             if self._safe_write_python(wu_path, content):
                 print("  -> Patched win32_utils.py")
-
-        we_path = os.path.join(site_packages, "qframelesswindow", "windows", "window_effect.py")
-        content = self._get_pristine_content(we_path)
-        if content:
-            self._ensure_backup(we_path)
-            content = self._sub(content,
-                "from ..utils.win32_utils import isGreaterEqualWin10, isGreaterEqualWin11, isCompositionEnabled",
-                "from ..utils.win32_utils import isGreaterEqualWin10, isGreaterEqualWin11, isCompositionEnabled, is_wine",
-                "window_effect is_wine import")
-            content = self._sub(content,
-                "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled():\n            return",
-                "    def addShadowEffect(self, hWnd):\n        if not isCompositionEnabled() or is_wine():\n            return",
-                "window_effect addShadowEffect guard")
-            content = self._sub(content,
-                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11():",
-                "    def setMicaEffect(self, hWnd, isDarkMode=False, isAlt=False):\n        if not isGreaterEqualWin11() or is_wine():",
-                "window_effect setMicaEffect guard")
-            content = self._sub(content,
-                "    def enableBlurBehindWindow(self, hWnd):\n        blurBehind = DWM_BLURBEHIND(1, True, 0, False)",
-                "    def enableBlurBehindWindow(self, hWnd):\n        if is_wine():\n            return\n        blurBehind = DWM_BLURBEHIND(1, True, 0, False)",
-                "window_effect enableBlurBehindWindow guard")
-            if self._safe_write_python(we_path, content):
-                print("  -> Patched window_effect.py")
 
     def _patch_qfluentwidgets(self, site_packages: str):
         fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py")
