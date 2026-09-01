@@ -132,22 +132,36 @@ def nudge(hwnd, webview, size):
     return followed
 
 
+def log(msg):
+    """Append to webview2_render_fix.log; fall back to %TEMP% when the
+    script directory is read-only (flatpak :ro share / container mounts)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "webview2_render_fix.log")
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg + "\n")
+        return
+    except OSError:
+        pass
+    fallback = os.path.join(os.environ.get("TEMP", os.environ.get("TMP", ".")), "webview2_render_fix.log")
+    try:
+        with open(fallback, "a", encoding="utf-8") as f:
+            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " " + msg + "\n")
+    except OSError:
+        pass
+
+
 def main():
-    log_path = os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "webview2_render_fix.log")
     hwnd, webview = find_window()
     if not hwnd:
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(time.strftime("%Y-%m-%d %H:%M:%S") + "   failed: no window\n")
+        log("failed: no window")
         sys.exit(2)
     size = size_of(hwnd)
     for attempt in range(MAX_RETRIES):
         if nudge(hwnd, webview, size):
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(time.strftime("%Y-%m-%d %H:%M:%S") + f" nudge ok (attempt {attempt + 1})\n")
+            log(f"nudge ok (attempt {attempt + 1})")
             sys.exit(0)
         time.sleep(2)
-    with open(log_path, "a", encoding="utf-8") as f:
-        f.write(time.strftime("%Y-%m-%d %H:%M:%S") + " nudge failed: child did not follow resize\n")
+    log("nudge failed: child did not follow resize")
     sys.exit(1)
 
 
