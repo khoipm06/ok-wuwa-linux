@@ -58,7 +58,7 @@ fi
 okww_find_app_dir
 if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
     echo "  -> OK-WW binary not found in prefix. Downloading online installer..."
-    DOWNLOAD_DIR="${PFX_PATH}/drive_c/users/steamuser/Downloads"
+    DOWNLOAD_DIR="${PFX_PATH}/drive_c/users/${PFX_USER}/Downloads"
     mkdir -p "${DOWNLOAD_DIR}"
     INSTALLER_HOST="${DOWNLOAD_DIR}/ok-ww-online-setup.exe"
     if [ ! -f "${INSTALLER_HOST}" ]; then
@@ -66,8 +66,8 @@ if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
     fi
 
     echo "  -> Running installer..."
-    INSTALLER_WIN="C:\\users\\steamuser\\Downloads\\ok-ww-online-setup.exe"
-    TARGET_DIR="C:\\users\\steamuser\\AppData\\Local\\ok-ww"
+    INSTALLER_WIN="C:\\users\\${PFX_USER}\\Downloads\\ok-ww-online-setup.exe"
+    TARGET_DIR="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww"
     if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
         flatpak run \
             --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
