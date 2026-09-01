@@ -23,23 +23,30 @@ from typing import List, Tuple, Optional
 class PatchEngine:
     def __init__(self, prefix_path: str):
         self.prefix_path = os.path.abspath(prefix_path)
-        self.site_packages, self.working_dir = self._locate_directories()
+        self.trees: List[Tuple[Optional[str], Optional[str]]] = self._locate_directories()
 
-    def _locate_directories(self) -> Tuple[Optional[str], Optional[str]]:
+    def _locate_directories(self) -> List[Tuple[Optional[str], Optional[str]]]:
         users_dir = os.path.join(self.prefix_path, "drive_c", "users")
-        site_packages = None
-        working_dir = None
+        trees: List[Tuple[Optional[str], Optional[str]]] = []
+        if not os.path.isdir(users_dir):
+            return trees
+        for user_entry in sorted(os.listdir(users_dir)):
+            app_dir = os.path.join(users_dir, user_entry, "AppData", "Local", "ok-ww", "data", "apps", "ok-ww")
+            sp = os.path.join(app_dir, "python", "Lib", "site-packages")
+            wk = os.path.join(app_dir, "working")
+            site_packages = sp if os.path.isdir(sp) else None
+            working_dir = wk if os.path.isdir(wk) and os.path.isfile(os.path.join(wk, "main.py")) else None
+            if site_packages or working_dir:
+                trees.append((site_packages, working_dir))
+        return trees
 
-        if os.path.isdir(users_dir):
-            for user_entry in os.listdir(users_dir):
-                app_dir = os.path.join(users_dir, user_entry, "AppData", "Local", "ok-ww", "data", "apps", "ok-ww")
-                sp = os.path.join(app_dir, "python", "Lib", "site-packages")
-                wk = os.path.join(app_dir, "working")
-                if os.path.isdir(sp):
-                    site_packages = sp
-                if os.path.isdir(wk) and os.path.isfile(os.path.join(wk, "main.py")):
-                    working_dir = wk
-        return site_packages, working_dir
+    @property
+    def site_packages(self) -> Optional[str]:
+        return self.trees[0][0] if self.trees else None
+
+    @property
+    def working_dir(self) -> Optional[str]:
+        return self.trees[0][1] if self.trees else None
 
     @staticmethod
     def _safe_write_python(file_path: str, content: str) -> bool:
@@ -74,19 +81,23 @@ class PatchEngine:
     def apply_patches(self) -> bool:
         """Apply all compatibility patches idempotently with AST validation."""
         print(f"[*] Target Wine Prefix: {self.prefix_path}")
-        if not self.site_packages:
-            print("[WARN] Python site-packages directory not found in prefix.")
-        else:
-            print(f"[1/3] Patching GUI framework packages in {self.site_packages}...")
-            self._patch_qframelesswindow()
-            self._patch_qfluentwidgets()
-
-        if not self.working_dir:
-            print("[WARN] OK-WW working directory (main.py) not found in prefix.")
-        else:
-            print(f"[2/3] Patching application modules in {self.working_dir}...")
-            self._patch_app_modules()
-
+        if not self.trees:
+            print("[WARN] No OK-WW installation found in prefix (python/ or working/ missing).")
+            return True
+        for i, (site_packages, working_dir) in enumerate(self.trees, 1):
+            if len(self.trees) > 1:
+                print(f"[*] Install tree {i}/{len(self.trees)}")
+            if site_packages:
+                print(f"[1/3] Patching GUI framework packages in {site_packages}...")
+                self._patch_qframelesswindow(site_packages)
+                self._patch_qfluentwidgets(site_packages)
+            else:
+                print("[WARN] Python site-packages directory not found in this tree.")
+            if working_dir:
+                print(f"[2/3] Patching application modules in {working_dir}...")
+                self._patch_app_modules(working_dir)
+            else:
+                print("[WARN] OK-WW working directory (main.py) not found in this tree.")
         print("[3/3] Verifying patched files...")
         return self.verify()
 
@@ -125,70 +136,70 @@ class PatchEngine:
     def get_status(self):
         """Report the status of each patch."""
         print(f"[*] Wine Prefix: {self.prefix_path}")
-        print(f"  -> Site Packages: {self.site_packages or 'Not Found'}")
-        print(f"  -> Working Dir:   {self.working_dir or 'Not Found'}")
-        print("\n--- Patch Status Checklist ---")
+        if not self.trees:
+            print("  -> No OK-WW install tree found (python/ or working/ missing).")
+            return
+        for i, (site_packages, working_dir) in enumerate(self.trees, 1):
+            if len(self.trees) > 1:
+                print(f"--- Install tree {i}/{len(self.trees)} ---")
+            print(f"  -> Site Packages: {site_packages or 'Not Found'}")
+            print(f"  -> Working Dir:   {working_dir or 'Not Found'}")
+            print("  --- Patch Status Checklist ---")
 
-        # 1. qframelesswindow
-        if self.site_packages:
-            wu_path = os.path.join(self.site_packages, "qframelesswindow", "utils", "win32_utils.py")
-            is_patched = os.path.isfile(wu_path) and "is_wine" in open(wu_path, "r", encoding="utf-8").read()
-            has_bak = os.path.isfile(wu_path + ".orig")
+            wu_path = os.path.join(site_packages, "qframelesswindow", "utils", "win32_utils.py") if site_packages else ""
+            is_patched = bool(wu_path) and os.path.isfile(wu_path) and "is_wine" in open(wu_path, "r", encoding="utf-8").read()
+            has_bak = bool(wu_path) and os.path.isfile(wu_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qframelesswindow (Mica/Glass bypass) [backup: {has_bak}]")
 
-            # 2. qfluentwidgets
-            fw_path = os.path.join(self.site_packages, "qfluentwidgets", "window", "fluent_window.py")
-            is_patched = os.path.isfile(fw_path) and "is_wine" in open(fw_path, "r", encoding="utf-8").read()
-            has_bak = os.path.isfile(fw_path + ".orig")
+            fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py") if site_packages else ""
+            is_patched = bool(fw_path) and os.path.isfile(fw_path) and "is_wine" in open(fw_path, "r", encoding="utf-8").read()
+            has_bak = bool(fw_path) and os.path.isfile(fw_path + ".orig")
             print(f"  [{'x' if is_patched else ' '}] qfluentwidgets (Solid Backgrounds) [backup: {has_bak}]")
-        else:
-            print("  [ ] qframelesswindow (Python environment not installed)")
-            print("  [ ] qfluentwidgets (Python environment not installed)")
 
-        # 3. App Modules
-        if self.working_dir:
-            for mod_rel, marker, name in [
-                ("ok/util/window.py", "is_wine", "Window Capture & Exe Matching"),
-                ("ok/core/translation.py", "fallback=True", "Translation Fallback"),
-                ("ok/util/explorer.py", "is_wine", "Explorer Launch Optimization"),
-                ("ok/util/process.py", "is_wine", "GPU / Process Info Guard"),
-                ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
-                ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
-                ("ok/ui/qt/start/StartCard.py", "UnregisterHotKey(hwnd, 999)", "Start Hotkey Window Binding"),
-                ("ok/ui/qt/debug/DebugTab.py", "UnregisterHotKey(hwnd, 1)", "Debug Hotkey Window Binding"),
-            ]:
-                p = os.path.join(self.working_dir, mod_rel)
-                is_patched = os.path.isfile(p) and marker in open(p, "r", encoding="utf-8").read()
-                has_bak = os.path.isfile(p + ".orig")
-                print(f"  [{'x' if is_patched else ' '}] {name} ({mod_rel}) [backup: {has_bak}]")
-        else:
-            print("  [ ] Application core modules (working/ directory not installed)")
+            if working_dir:
+                for mod_rel, marker, name in [
+                    ("ok/util/window.py", "is_wine", "Window Capture & Exe Matching"),
+                    ("ok/core/translation.py", "fallback=True", "Translation Fallback"),
+                    ("ok/util/explorer.py", "is_wine", "Explorer Launch Optimization"),
+                    ("ok/util/process.py", "is_wine", "GPU / Process Info Guard"),
+                    ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
+                    ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
+                    ("ok/ui/qt/start/StartCard.py", "UnregisterHotKey(hwnd, 999)", "Start Hotkey Window Binding"),
+                    ("ok/ui/qt/debug/DebugTab.py", "UnregisterHotKey(hwnd, 1)", "Debug Hotkey Window Binding"),
+                ]:
+                    p = os.path.join(working_dir, mod_rel)
+                    is_patched = os.path.isfile(p) and marker in open(p, "r", encoding="utf-8").read()
+                    has_bak = os.path.isfile(p + ".orig")
+                    print(f"  [{'x' if is_patched else ' '}] {name} ({mod_rel}) [backup: {has_bak}]")
+            else:
+                print("  [ ] Application core modules (working/ directory not installed)")
+
 
     def verify(self) -> bool:
         """Verify Python AST syntax and integrity of all target modules."""
         errors = 0
         checked = 0
-        if self.site_packages:
-            for sub in ["qframelesswindow/utils/win32_utils.py", "qframelesswindow/windows/window_effect.py", "qfluentwidgets/window/fluent_window.py"]:
-                p = os.path.join(self.site_packages, sub)
-                if os.path.isfile(p):
-                    checked += 1
-                    try:
-                        ast.parse(open(p, "r", encoding="utf-8").read(), filename=p)
-                    except SyntaxError as e:
-                        print(f"  [FAIL] {sub}: {e}")
-                        errors += 1
-
-        if self.working_dir:
-            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
-                p = os.path.join(self.working_dir, sub)
-                if os.path.isfile(p):
-                    checked += 1
-                    try:
-                        ast.parse(open(p, "r", encoding="utf-8").read(), filename=p)
-                    except SyntaxError as e:
-                        print(f"  [FAIL] {sub}: {e}")
-                        errors += 1
+        for site_packages, working_dir in self.trees:
+            if site_packages:
+                for sub in ["qframelesswindow/utils/win32_utils.py", "qframelesswindow/windows/window_effect.py", "qfluentwidgets/window/fluent_window.py"]:
+                    p = os.path.join(site_packages, sub)
+                    if os.path.isfile(p):
+                        checked += 1
+                        try:
+                            ast.parse(open(p, "r", encoding="utf-8").read(), filename=p)
+                        except SyntaxError as e:
+                            print(f"  [FAIL] {sub}: {e}")
+                            errors += 1
+            if working_dir:
+                for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
+                    p = os.path.join(working_dir, sub)
+                    if os.path.isfile(p):
+                        checked += 1
+                        try:
+                            ast.parse(open(p, "r", encoding="utf-8").read(), filename=p)
+                        except SyntaxError as e:
+                            print(f"  [FAIL] {sub}: {e}")
+                            errors += 1
 
         if checked == 0:
             print("  [WARN] 0 Python modules checked because application payload (working/ and python/) is not yet present.")
@@ -199,11 +210,10 @@ class PatchEngine:
         else:
             print(f"  -> Verification failed with {errors} syntax error(s).")
             return False
-
     # ------------------ Internal Patch Implementations ------------------
 
-    def _patch_qframelesswindow(self):
-        wu_path = os.path.join(self.site_packages, "qframelesswindow", "utils", "win32_utils.py")
+    def _patch_qframelesswindow(self, site_packages: str):
+        wu_path = os.path.join(site_packages, "qframelesswindow", "utils", "win32_utils.py")
         content = self._get_pristine_content(wu_path)
         if content:
             self._ensure_backup(wu_path)
@@ -250,8 +260,8 @@ class PatchEngine:
             if self._safe_write_python(we_path, content):
                 print("  -> Patched window_effect.py")
 
-    def _patch_qfluentwidgets(self):
-        fw_path = os.path.join(self.site_packages, "qfluentwidgets", "window", "fluent_window.py")
+    def _patch_qfluentwidgets(self, site_packages: str):
+        fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py")
         content = self._get_pristine_content(fw_path)
         if content:
             self._ensure_backup(fw_path)
@@ -275,9 +285,9 @@ class PatchEngine:
             if self._safe_write_python(fw_path, content):
                 print("  -> Patched fluent_window.py")
 
-    def _patch_app_modules(self):
+    def _patch_app_modules(self, working_dir: str):
         # 1. window.py
-        w_path = os.path.join(self.working_dir, "ok", "util", "window.py")
+        w_path = os.path.join(working_dir, "ok", "util", "window.py")
         content = self._get_pristine_content(w_path)
         if content:
             self._ensure_backup(w_path)
@@ -343,7 +353,7 @@ class PatchEngine:
                 print("  -> Patched ok/util/window.py")
 
         # 2. translation.py
-        t_path = os.path.join(self.working_dir, "ok", "core", "translation.py")
+        t_path = os.path.join(working_dir, "ok", "core", "translation.py")
         content = self._get_pristine_content(t_path)
         if content:
             self._ensure_backup(t_path)
@@ -359,7 +369,7 @@ class PatchEngine:
                 print("  -> Patched ok/core/translation.py")
 
         # 3. explorer.py
-        e_path = os.path.join(self.working_dir, "ok", "util", "explorer.py")
+        e_path = os.path.join(working_dir, "ok", "util", "explorer.py")
         content = self._get_pristine_content(e_path)
         if content:
             self._ensure_backup(e_path)
@@ -379,7 +389,7 @@ class PatchEngine:
                 print("  -> Patched ok/util/explorer.py")
 
         # 4. process.py (nvidia-smi guard)
-        p_path = os.path.join(self.working_dir, "ok", "util", "process.py")
+        p_path = os.path.join(working_dir, "ok", "util", "process.py")
         content = self._get_pristine_content(p_path)
         if content:
             self._ensure_backup(p_path)
@@ -401,7 +411,7 @@ class PatchEngine:
                 print("  -> Patched ok/util/process.py")
 
         # 5. config.py
-        c_path = os.path.join(self.working_dir, "config.py")
+        c_path = os.path.join(working_dir, "config.py")
         content = self._get_pristine_content(c_path)
         if content:
             self._ensure_backup(c_path)
@@ -427,7 +437,7 @@ class PatchEngine:
                 print("  -> Patched config.py")
 
         # 6. bitblt_utils.py
-        bu_path = os.path.join(self.working_dir, "ok", "device", "capture_methods", "bitblt_utils.py")
+        bu_path = os.path.join(working_dir, "ok", "device", "capture_methods", "bitblt_utils.py")
         content = self._get_pristine_content(bu_path)
         if content:
             self._ensure_backup(bu_path)
@@ -440,7 +450,7 @@ class PatchEngine:
         # 8. StartCard.py - bind hotkey to the widget's own window so
         #    RegisterHotKey/UnregisterHotKey stay symmetric (Wine leaks
         #    hotkeys registered to NULL after the widget is destroyed).
-        sc_path = os.path.join(self.working_dir, "ok", "ui", "qt", "start", "StartCard.py")
+        sc_path = os.path.join(working_dir, "ok", "ui", "qt", "start", "StartCard.py")
         content = self._get_pristine_content(sc_path)
         if content:
             self._ensure_backup(sc_path)
@@ -458,7 +468,7 @@ class PatchEngine:
         # 9. DebugTab.py - same hotkey window binding, with symmetric
         #    unregister (registering with a window handle but unregistering
         #    with NULL leaves the hotkey registered on Wine).
-        dt_path = os.path.join(self.working_dir, "ok", "ui", "qt", "debug", "DebugTab.py")
+        dt_path = os.path.join(working_dir, "ok", "ui", "qt", "debug", "DebugTab.py")
         content = self._get_pristine_content(dt_path)
         if content:
             self._ensure_backup(dt_path)
