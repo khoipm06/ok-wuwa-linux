@@ -102,12 +102,12 @@ if [ -f "${ICON_SRC}" ]; then
     fi
 fi
 
+cp "${SCRIPT_DIR}/common.sh" "${HOME}/.local/share/ok-wuwa/common.sh"
+cp "${SCRIPT_DIR}/patch_wine_compat.py" "${HOME}/.local/share/ok-wuwa/patch_wine_compat.py"
+cp "${SCRIPT_DIR}/cursor_visible.py" "${HOME}/.local/share/ok-wuwa/cursor_visible.py"
+cp "${SCRIPT_DIR}/webview2_render_fix.py" "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py"
 cp "${SCRIPT_DIR}/steam-wrapper.sh" "${HOME}/.local/share/ok-wuwa/steam-wrapper.sh"
 chmod +x "${HOME}/.local/share/ok-wuwa/steam-wrapper.sh"
-
-cp "${SCRIPT_DIR}/cursor_visible.py" "${HOME}/.local/share/ok-wuwa/cursor_visible.py"
-
-cp "${SCRIPT_DIR}/webview2_render_fix.py" "${HOME}/.local/share/ok-wuwa/webview2_render_fix.py"
 
 cp "${SCRIPT_DIR}/ok-wuwa" "${HOME}/.local/bin/ok-wuwa"
 chmod +x "${HOME}/.local/bin/ok-wuwa"
