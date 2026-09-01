@@ -127,7 +127,7 @@ if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (comm
     STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
     if command -v flatpak >/dev/null 2>&1; then
         echo "  -> Configuring Flatpak Steam permissions for wrapper..."
-        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa/steam-wrapper.sh:ro" com.valvesoftware.Steam 2>/dev/null || true
+        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa:ro" com.valvesoftware.Steam 2>/dev/null || true
     fi
 fi
 
