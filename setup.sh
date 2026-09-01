@@ -2,8 +2,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-APP_ID="3513350"
-APP_NAME="OK-WuWa"
+
+source "${SCRIPT_DIR}/common.sh"
 
 echo "=========================================================================="
 echo "                        OK-WuWa Proton Auto-Setup                         "
@@ -19,30 +19,7 @@ fi
 
 # 1. Discover Steam library folders
 echo "[1/5] Discovering Steam library folders..."
-VDF_CANDIDATES=(
-    "${HOME}/.steam/steam/steamapps/libraryfolders.vdf"
-    "${HOME}/.steam/root/steamapps/libraryfolders.vdf"
-    "${HOME}/.local/share/Steam/steamapps/libraryfolders.vdf"
-    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/libraryfolders.vdf"
-    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/libraryfolders.vdf"
-)
-
-STEAM_LIBS=()
-for vdf in "${VDF_CANDIDATES[@]}"; do
-    if [ -f "$vdf" ]; then
-        while IFS= read -r line; do
-            if [[ "$line" =~ \"path\"[[:space:]]+\"([^\"]+)\" ]]; then
-                lib_path="${BASH_REMATCH[1]}"
-                [ -d "$lib_path" ] && STEAM_LIBS+=("$lib_path")
-            fi
-        done < "$vdf"
-    fi
-done
-
-if [ ${#STEAM_LIBS[@]} -gt 0 ]; then
-    readarray -t STEAM_LIBS < <(printf '%s\n' "${STEAM_LIBS[@]}" | sort -u)
-fi
-
+steam_discover_libs
 if [ ${#STEAM_LIBS[@]} -eq 0 ]; then
     STEAM_LIBS=(
         "${HOME}/.local/share/Steam"
@@ -53,97 +30,32 @@ echo "  -> Discovered ${#STEAM_LIBS[@]} Steam library folder(s)."
 
 # 2. Locate Wuthering Waves prefix
 echo "[2/5] Locating Wuthering Waves (App ID: ${APP_ID}) prefix..."
-PFX_PATH=""
-for lib in "${STEAM_LIBS[@]}"; do
-    cand="${lib}/steamapps/compatdata/${APP_ID}/pfx"
-    [ -d "$cand" ] && { PFX_PATH="$cand"; break; }
-done
-
-if [ -z "$PFX_PATH" ]; then
-    SEARCH_ROOTS=()
-    for root in "/var/mnt" "/mnt" "/media" "/run/media/${USER}" "${HOME}"; do
-        [ -d "$root" ] && SEARCH_ROOTS+=("$root")
-    done
-    if [ ${#SEARCH_ROOTS[@]} -gt 0 ]; then
-        PFX_PATH=$(find "${SEARCH_ROOTS[@]}" -maxdepth 5 -path "*/steamapps/compatdata/${APP_ID}/pfx" -type d 2>/dev/null | head -n 1 || true)
-    fi
-fi
-
-if [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ]; then
+if ! steam_find_prefix; then
     echo "Error: Proton prefix for Wuthering Waves (${APP_ID}) not found."
     echo "Launch Wuthering Waves once in Steam before running setup."
     exit 1
 fi
 echo "  -> Found Prefix: ${PFX_PATH}"
-COMPAT_DATA_PATH="$(dirname "${PFX_PATH}")"
 
 # 3. Detect Proton Runner & Container Entry Point
 echo "[3/5] Detecting installed Proton runner & container..."
-ENTRY_POINT=""
-for lib in "${STEAM_LIBS[@]}"; do
-    cand=$(find "${lib}/steamapps/common" -maxdepth 3 -name "_v2-entry-point" -type f -perm -111 2>/dev/null | sort -V | tail -n 1 || true)
-    [ -n "$cand" ] && { ENTRY_POINT="$cand"; break; }
-done
-
-PROTON_BIN=""
-PROTON_SEARCH_DIRS=(
-    "${HOME}/.steam/root/compatibilitytools.d"
-    "${HOME}/.local/share/Steam/compatibilitytools.d"
-    "${HOME}/.var/app/com.valvesoftware.Steam/data/Steam/compatibilitytools.d"
-    "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam/compatibilitytools.d"
-)
-
-for lib in "${STEAM_LIBS[@]}"; do
-    PROTON_SEARCH_DIRS+=("${lib}/compatibilitytools.d" "${lib}/steamapps/common")
-done
-
-for dir in "${PROTON_SEARCH_DIRS[@]}"; do
-    if [ -d "$dir" ]; then
-        cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | grep -E "Proton-CachyOS|GE-Proton|Proton - Experimental|Proton [0-9]" | head -n 1 || true)
-        [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; break; }
-    fi
-done
-
-if [ -z "$PROTON_BIN" ]; then
-    for dir in "${PROTON_SEARCH_DIRS[@]}"; do
-        if [ -d "$dir" ]; then
-            cand=$(find "$dir" -maxdepth 3 -name "proton" -type f -perm -111 2>/dev/null | head -n 1 || true)
-            [ -n "$cand" ] && [ -x "$cand" ] && { PROTON_BIN="$cand"; break; }
-        fi
-    done
-fi
-
-if [ -z "$PROTON_BIN" ] || [ ! -x "$PROTON_BIN" ]; then
+steam_find_entry_point || true
+if ! steam_find_proton; then
     echo "Error: No usable Proton executable found."
     exit 1
 fi
 echo "  -> Using Proton: ${PROTON_BIN}"
 
-# Check Flatpak Steam and grant specific file permission for wrapper
-IS_FLATPAK=false
-STEAM_CLIENT_PATH="${HOME}/.local/share/Steam"
-if [ -d "${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam" ] || (command -v flatpak >/dev/null && flatpak info com.valvesoftware.Steam >/dev/null 2>&1); then
-    IS_FLATPAK=true
-    STEAM_CLIENT_PATH="${HOME}/.var/app/com.valvesoftware.Steam/.local/share/Steam"
-    if command -v flatpak >/dev/null 2>&1; then
-        echo "  -> Configuring Flatpak Steam permissions for wrapper..."
-        flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa:ro" com.valvesoftware.Steam 2>/dev/null || true
-    fi
+# Grant Flatpak Steam read access to the whole helper directory (wrapper,
+# common.sh, and fix helpers must all be visible inside the sandbox).
+steam_check_flatpak
+if [ "$IS_FLATPAK" = true ] && command -v flatpak >/dev/null 2>&1; then
+    echo "  -> Configuring Flatpak Steam permissions for wrapper..."
+    flatpak override --user --filesystem="${HOME}/.local/share/ok-wuwa:ro" com.valvesoftware.Steam 2>/dev/null || true
 fi
 
 # 4. Check OK-WW installation
-APP_DIR=""
-if [ -d "${PFX_PATH}/drive_c/users" ]; then
-    for u_dir in "${PFX_PATH}/drive_c/users"/*; do
-        cand="${u_dir}/AppData/Local/ok-ww"
-        [ -d "$cand" ] && { APP_DIR="$cand"; break; }
-    done
-fi
-
-if [ -z "$APP_DIR" ]; then
-    APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
-fi
-
+okww_find_app_dir
 if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
     echo "  -> OK-WW binary not found in prefix. Downloading online installer..."
     DOWNLOAD_DIR="${PFX_PATH}/drive_c/users/steamuser/Downloads"
@@ -152,7 +64,7 @@ if [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
     if [ ! -f "${INSTALLER_HOST}" ]; then
         curl -L --fail -o "${INSTALLER_HOST}" "https://github.com/ok-oldking/ok-wuthering-waves/releases/latest/download/ok-ww-win32-online-setup.exe"
     fi
-    
+
     echo "  -> Running installer..."
     INSTALLER_WIN="C:\\users\\steamuser\\Downloads\\ok-ww-online-setup.exe"
     TARGET_DIR="C:\\users\\steamuser\\AppData\\Local\\ok-ww"
