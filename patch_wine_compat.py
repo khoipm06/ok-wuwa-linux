@@ -154,7 +154,6 @@ class PatchEngine:
                 ("ok/util/process.py", "is_wine", "GPU / Process Info Guard"),
                 ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
                 ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
-                ("ok/ui/qt/about/UpdateCard.py", "not self.pyappify_app_version", "PyAppify Update Loop Silence"),
                 ("ok/ui/qt/start/StartCard.py", "UnregisterHotKey(hwnd, 999)", "Start Hotkey Window Binding"),
                 ("ok/ui/qt/debug/DebugTab.py", "UnregisterHotKey(hwnd, 1)", "Debug Hotkey Window Binding"),
             ]:
@@ -181,7 +180,7 @@ class PatchEngine:
                         errors += 1
 
         if self.working_dir:
-            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/about/UpdateCard.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
+            for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py", "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
                 p = os.path.join(self.working_dir, sub)
                 if os.path.isfile(p):
                     checked += 1
@@ -437,18 +436,6 @@ class PatchEngine:
             content = content.replace(old_cap, new_cap)
             if self._safe_write_python(bu_path, content):
                 print("  -> Patched ok/device/capture_methods/bitblt_utils.py")
-
-        # 7. UpdateCard.py
-        uc_path = os.path.join(self.working_dir, "ok", "ui", "qt", "about", "UpdateCard.py")
-        content = self._get_pristine_content(uc_path)
-        if content:
-            self._ensure_backup(uc_path)
-            content = content.replace(
-                "    def check_for_updates(self):\n        if self._busy:\n            return",
-                "    def check_for_updates(self):\n        if self._busy or not self.pyappify_app_version:\n            return"
-            )
-            if self._safe_write_python(uc_path, content):
-                print("  -> Patched ok/ui/qt/about/UpdateCard.py")
 
         # 8. StartCard.py - bind hotkey to the widget's own window so
         #    RegisterHotKey/UnregisterHotKey stay symmetric (Wine leaks
