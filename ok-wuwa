@@ -106,11 +106,15 @@ if [ -d "${PFX_PATH}/drive_c/users" ]; then
     done
 fi
 
+PFX_USER="steamuser"
+if [ -n "$APP_DIR" ]; then
+    PFX_USER="$(basename "$(dirname "$(dirname "$(dirname "$APP_DIR")")")")"
+fi
 [ -z "$APP_DIR" ] && APP_DIR="${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww"
 WORKING_DIR="${APP_DIR}/data/apps/ok-ww/working"
-PYTHON_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
-MAIN_PY="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
-LAUNCHER_EXE="C:\\users\\steamuser\\AppData\\Local\\ok-ww\\ok-ww.exe"
+PYTHON_EXE="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
+MAIN_PY="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
+LAUNCHER_EXE="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\ok-ww.exe"
 
 # If working directory exists, ensure patches are active
 if [ -d "${WORKING_DIR}" ] && [ -f "${SCRIPT_DIR}/patch_wine_compat.py" ]; then
@@ -120,7 +124,7 @@ fi
 TARGET_EXE="${LAUNCHER_EXE}"
 TARGET_ARG=""
 
-if [ "$1" = "--direct" ] || [ "$1" = "--python" ] || [ ! -f "${PFX_PATH}/drive_c/users/steamuser/AppData/Local/ok-ww/ok-ww.exe" ]; then
+if [ "$1" = "--direct" ] || [ "$1" = "--python" ] || [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
     TARGET_EXE="${PYTHON_EXE}"
     TARGET_ARG="${MAIN_PY}"
     [ "$1" = "--direct" ] || [ "$1" = "--python" ] && shift
