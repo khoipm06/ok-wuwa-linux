@@ -47,6 +47,7 @@ okww_resolve_targets "${DIRECT_FLAG}"
 #    Chromium never presents its first frame (blank white window).
 okww_detect_wv2 || true
 okww_get_render_fix_win
+okww_wv2_flags
 if [ -z "${RENDER_FIX_WIN}" ] && [ "${TARGET_EXE}" = "${LAUNCHER_WIN}" ]; then
     echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
 fi
@@ -63,22 +64,4 @@ INNER="$(okww_build_inner_cmd)"
 okww_start_cursor_fix
 
 # 7. Execute OK-WuWa inside the Steam Linux Runtime container.
-if [ "$IS_FLATPAK" = true ] && [ -n "${ENTRY_POINT}" ]; then
-    exec flatpak run \
-        --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
-        --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
-        ${WV2_DIR:+--env=WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"} \
-        --command="${ENTRY_POINT}" \
-        com.valvesoftware.Steam \
-        --verb=runinprefix -- bash -c "$INNER"
-elif [ -n "${ENTRY_POINT}" ]; then
-    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
-    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-    exec "${ENTRY_POINT}" --verb=runinprefix -- bash -c "$INNER"
-else
-    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
-    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-    exec bash -c "$INNER"
-fi
+okww_launch_app
