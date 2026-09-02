@@ -239,8 +239,7 @@ class PatchEngine:
                     ("ok/util/process.py", "is_wine", "GPU / Process Info Guard"),
                     ("config.py", "steam://rungameid/3513350", "Anti-Cheat Safe Game Launcher"),
                     ("ok/device/capture_methods/bitblt_utils.py", "clean_up_bitblt(context)", "BitBlt HWND Validation"),
-                    ("ok/ui/qt/start/StartCard.py", "UnregisterHotKey(hwnd, 999)", "Start Hotkey Window Binding"),
-                    ("ok/ui/qt/debug/DebugTab.py", "UnregisterHotKey(hwnd, 1)", "Debug Hotkey Window Binding"),
+                    ("ok/ui/qt/start/StartCard.py", "hotkey binding skipped on Wine", "Start Hotkey Thread Guard"),
                 ]:
                     p = os.path.join(working_dir, mod_rel)
                     is_patched = os.path.isfile(p) and marker in open(p, "r", encoding="utf-8").read()
@@ -266,7 +265,7 @@ class PatchEngine:
                             errors += 1
             if working_dir:
                 for sub in ["ok/util/window.py", "ok/core/translation.py", "ok/util/explorer.py", "ok/util/process.py", "config.py",
-                            "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/start/StartCard.py", "ok/ui/qt/debug/DebugTab.py"]:
+                            "ok/device/capture_methods/bitblt_utils.py", "ok/ui/qt/start/StartCard.py"]:
                     p = os.path.join(working_dir, sub)
                     if os.path.isfile(p):
                         checked += 1
@@ -485,45 +484,50 @@ class PatchEngine:
             if self._safe_write_python(bu_path, content):
                 print("  -> Patched ok/device/capture_methods/bitblt_utils.py")
 
-        # 7. StartCard.py - bind hotkey to the widget's own window so
-        #    RegisterHotKey/UnregisterHotKey stay symmetric (Wine leaks
-        #    hotkeys registered to NULL after the widget is destroyed).
+        # StartCard.check_hotkey polls PeekMessageW(NULL,...) from a background
+        # Handler thread every 100ms. On Wine/XWayland that creates a thread
+        # message queue cross-attached to the desktop input queue, which
+        # deadlocks the GUI thread during MainWindow.__init__ (empirically
+        # proven: removing only this poll unblocks startup). Hotkey presses
+        # are not consumed without it, so RegisterHotKey binding is removed
+        # too - the start/stop button stays the working trigger on Wine.
         sc_path = os.path.join(working_dir, "ok", "ui", "qt", "start", "StartCard.py")
         content = self._get_pristine_content(sc_path)
         if content:
             self._ensure_backup(sc_path)
-            content = self._sub(content,
-                "        windll.user32.UnregisterHotKey(None, 999)",
-                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        windll.user32.UnregisterHotKey(hwnd, 999)",
-                "StartCard unregister hwnd")
-            content = self._sub(content,
-                "            if not windll.user32.RegisterHotKey(None, 999, 0, vk_map[hotkey]):",
-                "            hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n            if not windll.user32.RegisterHotKey(hwnd, 999, 0, vk_map[hotkey]):",
-                "StartCard register hwnd")
+            content = WINE_FUNC + content
+            peek_block = (
+                "        msg = wintypes.MSG()\n"
+                "        if windll.user32.PeekMessageW(byref(msg), None, 0, 0, 1):\n"
+                "            if msg.message == 0x0312:  # WM_HOTKEY\n"
+                "                logger.debug(f'hotkey pressed {msg}')\n"
+                "                if msg.wParam == 999:\n"
+                "                    self.clicked()\n"
+                "\n"
+                "        self.handler.post(self.check_hotkey, 0.1)"
+            )
+            content = self._sub(content, peek_block,
+                "        self.handler.post(self.check_hotkey, 0.1)",
+                "StartCard background PeekMessageW poll")
+            rebind_block = (
+                "    def rebind_hotkey(self, hotkey):\n"
+                "        windll.user32.UnregisterHotKey(None, 999)\n"
+                "        vk_map = {'F9': 0x78, 'F10': 0x79, 'F11': 0x7A, 'F12': 0x7B}\n"
+                "\n"
+                "        if hotkey and hotkey != 'None' and hotkey in vk_map:\n"
+                "            if not windll.user32.RegisterHotKey(None, 999, 0, vk_map[hotkey]):\n"
+                "                logger.error(f\"Failed to register hotkey {hotkey}\")\n"
+                "        else:\n"
+                "            logger.debug(f\"Hotkey disabled or invalid: {hotkey}\")"
+            )
+            content = self._sub(content, rebind_block,
+                "    def rebind_hotkey(self, hotkey):\n"
+                "        if is_wine():\n"
+                "            return\n"
+                "        logger.debug('hotkey binding skipped on Wine')",
+                "StartCard hotkey thread registration")
             if self._safe_write_python(sc_path, content):
                 print("  -> Patched ok/ui/qt/start/StartCard.py")
-
-        # 8. DebugTab.py - same hotkey window binding, with symmetric
-        #    unregister (the previous no-op replace left None here while
-        #    registering with hwnd, leaking the hotkey).
-        dt_path = os.path.join(working_dir, "ok", "ui", "qt", "debug", "DebugTab.py")
-        content = self._get_pristine_content(dt_path)
-        if content:
-            self._ensure_backup(dt_path)
-            content = self._sub(content,
-                "        if not windll.user32.RegisterHotKey(None, 1, MOD_ALT | MOD_CONTROL, VK_D):",
-                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        if not windll.user32.RegisterHotKey(hwnd, 1, MOD_ALT | MOD_CONTROL, VK_D):",
-                "DebugTab register hwnd 1")
-            content = self._sub(content,
-                "        if not windll.user32.RegisterHotKey(None, 2, MOD_ALT | MOD_CONTROL, VK_S):",
-                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        if not windll.user32.RegisterHotKey(hwnd, 2, MOD_ALT | MOD_CONTROL, VK_S):",
-                "DebugTab register hwnd 2")
-            content = self._sub(content,
-                "        windll.user32.UnregisterHotKey(None, 1)\n        windll.user32.UnregisterHotKey(None, 2)",
-                "        hwnd = int(self.winId()) if hasattr(self, 'winId') else None\n        windll.user32.UnregisterHotKey(hwnd, 1)\n        windll.user32.UnregisterHotKey(hwnd, 2)",
-                "DebugTab unregister hwnd")
-            if self._safe_write_python(dt_path, content):
-                print("  -> Patched ok/ui/qt/debug/DebugTab.py")
 
 
 def resolve_prefix(target: str) -> Optional[str]:
