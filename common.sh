@@ -205,6 +205,21 @@ okww_wv2_flags() {
     WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
 }
 
+okww_launch_app() {
+    # Run the INNER command via the Steam Linux Runtime container. Direct
+    # host execution: going through `flatpak run` breaks WebView2 creation
+    # inside the nested bwrap sandbox (0x80010108), so env vars are exported
+    # instead of relying on the flatpak environment bridge.
+    export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+    export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
+    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
+    if [ -n "${ENTRY_POINT}" ]; then
+        exec "${ENTRY_POINT}" --verb=runinprefix -- bash -c "$INNER"
+    fi
+    exec bash -c "$INNER"
+}
+
 okww_start_cursor_fix() {
     if [ -n "$RESOURCE_DIR" ] && [ -f "${RESOURCE_DIR}/cursor_visible.py" ]; then
         ( python3 "${RESOURCE_DIR}/cursor_visible.py" >/dev/null 2>&1 & ) 2>/dev/null || true
