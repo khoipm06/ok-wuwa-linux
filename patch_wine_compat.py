@@ -254,7 +254,7 @@ class PatchEngine:
         checked = 0
         for site_packages, working_dir in self.trees:
             if site_packages:
-                for sub in ["qframelesswindow/utils/win32_utils.py", "qfluentwidgets/window/fluent_window.py"]:
+                for sub in ["qframelesswindow/utils/win32_utils.py", "qframelesswindow/windows/window_effect.py", "qfluentwidgets/window/fluent_window.py"]:
                     p = os.path.join(site_packages, sub)
                     if os.path.isfile(p):
                         checked += 1
@@ -303,6 +303,21 @@ class PatchEngine:
                 "win32_utils isGreaterEqualWin11 guard")
             if self._safe_write_python(wu_path, content):
                 print("  -> Patched win32_utils.py")
+
+        we_path = os.path.join(site_packages, "qframelesswindow", "windows", "window_effect.py")
+        content = self._get_pristine_content(we_path)
+        if content:
+            self._ensure_backup(we_path)
+            content = self._sub(content,
+                "from ..utils.win32_utils import isGreaterEqualWin10, isGreaterEqualWin11, isCompositionEnabled",
+                "from ..utils.win32_utils import isGreaterEqualWin10, isGreaterEqualWin11, isCompositionEnabled, is_wine",
+                "window_effect is_wine import")
+            content = self._sub(content,
+                '        if not isGreaterEqualWin11():\n            warnings.warn("The mica effect is only available on Win11")\n            return',
+                '        if not isGreaterEqualWin11() or is_wine():\n            return',
+                "window_effect setMicaEffect wine guard")
+            if self._safe_write_python(we_path, content):
+                print("  -> Patched window_effect.py")
 
     def _patch_qfluentwidgets(self, site_packages: str):
         fw_path = os.path.join(site_packages, "qfluentwidgets", "window", "fluent_window.py")
