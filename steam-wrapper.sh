@@ -41,6 +41,7 @@ fi
 # Detect installed WebView2 Runtime path
 okww_detect_wv2 || true
 okww_get_render_fix_win
+okww_wv2_flags
 if [ -z "${RENDER_FIX_WIN}" ] && [ "${TARGET_EXE}" = "${LAUNCHER_WIN}" ]; then
     echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
 fi
@@ -66,6 +67,7 @@ if [ -n "${PROTON_BIN}" ]; then
     if [ -f "${APP_DIR}/ok-ww.exe" ] || { [ -f "${APP_DIR}/data/apps/ok-ww/python/python.exe" ] && [ -f "${APP_DIR}/data/apps/ok-ww/working/main.py" ]; }; then
         (
             [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
+            export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
             bash -c "$INNER" >/dev/null 2>&1 &
         ) &
     fi
