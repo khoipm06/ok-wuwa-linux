@@ -451,39 +451,18 @@ class PatchEngine:
                 "    return str(game_exe_folder / \"Wuthering Waves.exe\")"
             )
             new_calc = (
-                "def _find_steam_game_exe():\n"
-                "    import string\n"
-                "    from pathlib import Path\n"
-                "    sub_candidates = (\n"
-                "        ('common', 'Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "        ('steamapps', 'common', 'Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "        ('SteamLibrary', 'steamapps', 'common', 'Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "        ('Program Files (x86)', 'Steam', 'steamapps', 'common', 'Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "        ('Program Files', 'Steam', 'steamapps', 'common', 'Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "        ('Wuthering Waves', 'Wuthering Waves.exe'),\n"
-                "    )\n"
-                "    for letter in string.ascii_uppercase:\n"
-                "        drive = Path(f'{letter}:/')\n"
-                "        if not drive.exists():\n"
-                "            continue\n"
-                "        for parts in sub_candidates:\n"
-                "            cand = drive.joinpath(*parts)\n"
-                "            try:\n"
-                "                if cand.is_file():\n"
-                "                    return str(cand)\n"
-                "            except OSError:\n"
-                "                continue\n"
-                "    return None\n\n\n"
                 "def calculate_pc_exe_path(running_path):\n"
                 "    if running_path is None:\n"
-                "        standalone = _find_most_recently_run_pc_exe() or _find_pc_exe_from_registry() or _find_steam_game_exe()\n"
+                "        if is_wine():\n"
+                "            return \"steam://rungameid/3513350\"\n"
+                "        standalone = _find_most_recently_run_pc_exe() or _find_pc_exe_from_registry()\n"
                 "        if standalone:\n"
                 "            return standalone\n"
                 "        return \"steam://rungameid/3513350\"\n"
                 "    game_exe_folder = Path(running_path).parents[3]\n"
                 "    return str(game_exe_folder / \"Wuthering Waves.exe\")"
             )
-            content = self._sub(content, old_calc, new_calc, "config.py steam exe discovery")
+            content = self._sub(content, old_calc, new_calc, "config.py steam uri fallback")
             if self._safe_write_python(c_path, content):
                 print("  -> Patched config.py")
 
