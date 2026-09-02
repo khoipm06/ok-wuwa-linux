@@ -77,10 +77,53 @@ class PatchEngine:
         return True
 
     def _ensure_backup(self, file_path: str):
-        """Create a .orig backup if it does not already exist."""
+        """Create a .orig backup of the pristine upstream file.
+
+        Lineage tracking: the .orig.meta sidecar records the upstream file's
+        size and mtime at backup time. If the live file was updated upstream
+        (ok-ww self-update) while a stale .orig from the old version sits
+        next to it, the meta proves the .orig no longer matches any current
+        upstream build and gets refreshed from the live file. This keeps
+        .orig pinned to the true original of the INSTALLED version, never to
+        an intermediate patched state (a patched file never passes the
+        AST+patch-marker test below).
+        """
         backup_path = file_path + ".orig"
-        if not os.path.isfile(backup_path) and os.path.isfile(file_path):
+        meta_path = file_path + ".orig.meta"
+        if not os.path.isfile(file_path):
+            return
+        upstream_stamp = f"{os.path.getsize(file_path)}:{int(os.path.getmtime(file_path))}"
+
+        if os.path.isfile(backup_path):
+            if os.path.isfile(meta_path):
+                with open(meta_path, "r", encoding="utf-8") as f:
+                    recorded = f.read().strip()
+                if recorded == upstream_stamp:
+                    return
+            if self._file_looks_patched(file_path):
+                return
+            print(f"  [INFO] Upstream file changed; refreshing backup for {os.path.basename(file_path)}")
             shutil.copy2(file_path, backup_path)
+        else:
+            shutil.copy2(file_path, backup_path)
+
+        with open(meta_path, "w", encoding="utf-8") as f:
+            f.write(upstream_stamp)
+
+    @staticmethod
+    def _file_looks_patched(file_path: str) -> bool:
+        """Heuristic: is the live file our patched output rather than pristine upstream?"""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                content = f.read()
+            if "def is_wine():" in content or ", is_wine" in content or "is_wine()" in content:
+                return True
+            for marker in ("fallback=True", "steam://rungameid/3513350", "clean_up_bitblt(context)"):
+                if marker in content:
+                    return True
+        except OSError:
+            pass
+        return False
 
     def _get_pristine_content(self, file_path: str) -> Optional[str]:
         """Read content from .orig if available, otherwise from original file."""
