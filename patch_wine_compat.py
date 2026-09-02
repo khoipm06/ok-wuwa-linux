@@ -443,6 +443,7 @@ class PatchEngine:
         content = self._get_pristine_content(c_path)
         if content:
             self._ensure_backup(c_path)
+            content = WINE_FUNC + content
             old_calc = (
                 "def calculate_pc_exe_path(running_path):\n"
                 "    if running_path is None:\n"
