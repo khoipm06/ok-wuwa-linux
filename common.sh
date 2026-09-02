@@ -199,6 +199,12 @@ okww_get_render_fix_win() {
     fi
 }
 
+okww_wv2_flags() {
+    # Chromium sandbox/GPU paths break inside the bwrap/pressure-vessel
+    # sandbox; WebView2 fails to create (0x80010108) without these switches.
+    WV2_FLAGS="--no-sandbox --disable-gpu --disable-gpu-compositing --disable-gpu-rasterization --in-process-gpu --disable-features=RendererCodeIntegrity,TouchEvents,TouchSelectionStrategy,DWriteFontProxy,DirectComposition,DirectCompositionLayers,WidgetLayering --disable-direct-composition-video-overlays --disable-accelerated-2d-canvas --disable-accelerated-video-decode"
+}
+
 okww_start_cursor_fix() {
     if [ -n "$RESOURCE_DIR" ] && [ -f "${RESOURCE_DIR}/cursor_visible.py" ]; then
         ( python3 "${RESOURCE_DIR}/cursor_visible.py" >/dev/null 2>&1 & ) 2>/dev/null || true
