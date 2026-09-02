@@ -232,6 +232,33 @@ okww_apply_patches() {
     fi
 }
 
+okww_find_game_shipping() {
+    GAME_SHIPPING=""
+    [ -z "$PFX_PATH" ] || [ ! -d "$PFX_PATH" ] && return 1
+
+    local search_parts=(
+        "common/Wuthering Waves/Client/Binaries/Win64/Client-Win64-Shipping.exe"
+        "steamapps/common/Wuthering Waves/Client/Binaries/Win64/Client-Win64-Shipping.exe"
+    )
+    local dd_dir="${PFX_PATH}/dosdevices"
+    [ ! -d "$dd_dir" ] && return 1
+    local link letter real target
+    for link in "${dd_dir}"/[a-zA-Z]: ; do
+        [ -L "$link" ] || continue
+        letter="$(basename "$link")"
+        real="$(readlink -f "$link")" || continue
+        [ -d "$real" ] || continue
+        for parts in "${search_parts[@]}"; do
+            target="${real}/${parts}"
+            if [ -f "$target" ]; then
+                GAME_SHIPPING="${letter^}\\$(echo "$parts" | sed 's|/|\\|g')"
+                return 0
+            fi
+        done
+    done
+    return 1
+}
+
 okww_build_inner_cmd() {
     cat << 'EOF'
 if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS; fi
