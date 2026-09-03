@@ -60,17 +60,16 @@ INNER="$(okww_build_inner_cmd)"
 # windows; define the theme cursor on the ok-ww window when it appears.
 okww_start_cursor_fix
 
-# Launch OK-WuWa alongside the game. Both processes must share one wineserver,
-# so the render-fix helper runs in the same process tree (same container).
-# If no Proton runner is resolvable, skip silently - the game still launches.
-if [ -n "${PROTON_BIN}" ]; then
-    if [ -f "${APP_DIR}/ok-ww.exe" ] || { [ -f "${APP_DIR}/data/apps/ok-ww/python/python.exe" ] && [ -f "${APP_DIR}/data/apps/ok-ww/working/main.py" ]; }; then
-        (
-            [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-            export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
-            bash -c "$INNER" >/dev/null 2>&1 &
-        ) &
-    fi
+# 7. Launch OK-WuWa alongside the game. Both processes must share one wineserver
+#    and the Steam client pipe, so the companion runs through the same
+#    entry point with the python entry (WebView2 does not survive nesting).
+#    If no Proton runner is resolvable, skip silently - the game still launches.
+if [ -n "${PROTON_BIN}" ] && { [ -f "${APP_DIR}/data/apps/ok-ww/python/python.exe" ] && [ -f "${APP_DIR}/data/apps/ok-ww/working/main.py" ]; }; then
+    (
+        export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
+        export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+        "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" >/dev/null 2>&1 &
+    ) &
 fi
 
 exec "$@"
