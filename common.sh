@@ -155,17 +155,20 @@ okww_find_app_dir() {
 }
 
 okww_resolve_targets() {
-    local direct_flag="$1"
+    # The Tauri launcher shell (ok-ww.exe) needs WebView2, which fails to
+    # create inside the nested flatpak->bwrap sandbox (0x80010108). Default
+    # to the python entry point, which the automation UI needs anyway.
     LAUNCHER_WIN="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\ok-ww.exe"
     PYTHON_WIN="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\python\\python.exe"
     MAIN_PY_WIN="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\data\\apps\\ok-ww\\working\\main.py"
 
-    TARGET_EXE="${LAUNCHER_WIN}"
-    TARGET_ARG=""
+    TARGET_EXE="${PYTHON_WIN}"
+    TARGET_ARG="${MAIN_PY_WIN}"
 
-    if [ "$direct_flag" = "--direct" ] || [ "$direct_flag" = "--python" ] || [ ! -f "${APP_DIR}/ok-ww.exe" ]; then
-        TARGET_EXE="${PYTHON_WIN}"
-        TARGET_ARG="${MAIN_PY_WIN}"
+    if [ "$1" = "--launcher" ] && [ -f "${APP_DIR}/ok-ww.exe" ]; then
+        TARGET_EXE="${LAUNCHER_WIN}"
+        TARGET_ARG=""
+        shift
     fi
 }
 
@@ -206,15 +209,33 @@ okww_wv2_flags() {
 }
 
 okww_launch_app() {
-    # Run the INNER command via the Steam Linux Runtime container. Direct
-    # host execution: going through `flatpak run` breaks WebView2 creation
-    # inside the nested bwrap sandbox (0x80010108), so env vars are exported
-    # instead of relying on the flatpak environment bridge.
+    # The app must join the same bwrap/pressure-vessel /tmp tmpfs as the
+    # Steam-launched game, otherwise Wine rendezvous via a second isolated
+    # wineserver (window enumeration and steam:// launching both break).
+    # Going through `flatpak run` of the Steam app shares that tmpfs.
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-    [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
-    export WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS="${WV2_FLAGS}"
+    export OKWW_APP_VERSION="${APP_VERSION}"
+    export OKWW_APP_EXE="${APP_EXE_WIN}"
+
+    if [ "${IS_FLATPAK}" = true ] && [ -n "${ENTRY_POINT}" ] && command -v flatpak >/dev/null 2>&1; then
+        exec flatpak run \
+            --env=STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}" \
+            --env=STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}" \
+            --env=OKWW_PROTON="${PROTON_BIN}" \
+            --env=OKWW_TARGET="${TARGET_EXE}" \
+            --env=OKWW_PYTHON="${PYTHON_WIN}" \
+            --env=OKWW_FIX="${RENDER_FIX_WIN}" \
+            --env=OKWW_ARGS="${TARGET_ARG:+${TARGET_ARG} }$*" \
+            --env=OKWW_APP_VERSION="${APP_VERSION}" \
+            --env=OKWW_APP_EXE="${APP_EXE_WIN}" \
+            --command="${ENTRY_POINT}" \
+            com.valvesoftware.Steam \
+            --verb=runinprefix -- bash -c "$INNER"
+    fi
+
     if [ -n "${ENTRY_POINT}" ]; then
+        [ -n "$WV2_DIR" ] && export WEBVIEW2_BROWSER_EXECUTABLE_FOLDER="${WV2_DIR}"
         exec "${ENTRY_POINT}" --verb=runinprefix -- bash -c "$INNER"
     fi
     exec bash -c "$INNER"
@@ -259,8 +280,27 @@ okww_find_game_shipping() {
     return 1
 }
 
+okww_read_app_json() {
+    APP_VERSION=""
+    APP_PROFILE="Global"
+    APP_EXE_WIN=""
+    local app_json="${APP_DIR}/data/apps/ok-ww/app.json"
+    if [ -f "$app_json" ] && command -v python3 >/dev/null 2>&1; then
+        read -r APP_VERSION APP_PROFILE < <(python3 -c "
+import json
+d = json.load(open(r'$app_json'))
+print(d.get('current_version') or '', d.get('current_profile') or 'Global')
+" 2>/dev/null) || true
+    fi
+    [ -f "${APP_DIR}/ok-ww.exe" ] && APP_EXE_WIN="C:\\users\\${PFX_USER}\\AppData\\Local\\ok-ww\\ok-ww.exe"
+}
+
 okww_build_inner_cmd() {
     cat << 'EOF'
+export PYAPPIFY_APP_VERSION="${OKWW_APP_VERSION}"
+export PYAPPIFY_APP_STARTING_VERSION="${OKWW_APP_VERSION}"
+export PYAPPIFY_VERSION="1.2.3"
+export PYAPPIFY_EXECUTABLE="${OKWW_APP_EXE}"
 if [ -z "$OKWW_FIX" ]; then exec "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS; fi
 "$OKWW_PROTON" runinprefix "$OKWW_TARGET" $OKWW_ARGS &
 "$OKWW_PROTON" runinprefix "$OKWW_PYTHON" "$OKWW_FIX"

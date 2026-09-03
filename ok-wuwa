@@ -35,13 +35,14 @@ steam_check_flatpak
 # 4. Resolve OK-WW targets; re-apply compat patches if the app is installed
 okww_find_app_dir
 okww_apply_patches
+okww_read_app_json
 
-DIRECT_FLAG=""
-if [ "$1" = "--direct" ] || [ "$1" = "--python" ]; then
-    DIRECT_FLAG="$1"
+if [ "$1" = "--launcher" ]; then
+    okww_resolve_targets --launcher
     shift
+else
+    okww_resolve_targets ""
 fi
-okww_resolve_targets "${DIRECT_FLAG}"
 
 # 5. Detect WebView2 Runtime; the launcher needs the render-fix sidecar or
 #    Chromium never presents its first frame (blank white window).
@@ -64,4 +65,4 @@ INNER="$(okww_build_inner_cmd)"
 okww_start_cursor_fix
 
 # 7. Execute OK-WuWa inside the Steam Linux Runtime container.
-okww_launch_app
+okww_launch_app "$@"
