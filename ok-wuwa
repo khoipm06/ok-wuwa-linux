@@ -1,68 +1,199 @@
 #!/usr/bin/env bash
+# ok-wuwa - Universal Linux launcher & updater for OK-WuWa
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared helpers (from this checkout, or the installed share dir)
 if [ -f "${SCRIPT_DIR}/common.sh" ]; then
     source "${SCRIPT_DIR}/common.sh"
 elif [ -f "${HOME}/.local/share/ok-wuwa/common.sh" ]; then
     source "${HOME}/.local/share/ok-wuwa/common.sh"
 else
-    echo "Error: common.sh not found. Run setup.sh first." >&2
+    echo "Error: common.sh not found. Run ./setup.sh first." >&2
     exit 1
 fi
 
-okww_find_resource_dir "${SCRIPT_DIR}"
+okww_find_resource_dir "${SCRIPT_DIR}" || true
 
-# 1. Discover Steam libraries and locate the Wuthering Waves prefix
+EXPLICIT_PREFIX=""
+ACTION="run"
+UPDATE_TAG=""
+PASS_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --prefix)
+            EXPLICIT_PREFIX="$2"
+            shift 2
+            ;;
+        --prefix=*)
+            EXPLICIT_PREFIX="${1#*=}"
+            shift
+            ;;
+        --update)
+            ACTION="update"
+            if [ $# -gt 1 ] && [[ "$2" =~ ^v[0-9] ]]; then
+                UPDATE_TAG="$2"
+                shift
+            fi
+            shift
+            ;;
+        --status|--verify|--revert|--undo)
+            ACTION="patcher"
+            PASS_ARGS+=("$1")
+            shift
+            ;;
+        --help)
+            cat << 'EOF'
+Usage: ok-wuwa [OPTIONS] [-- OK-WW ARGS]
+
+Options:
+  --update [vX.Y.Z]   Install or update OK-WW to the latest (or specified) release
+  --prefix <PATH>     Override the target Proton compatdata / prefix directory
+  --status            Show Wine compatibility patch status
+  --verify            Verify AST syntax of all patched OK-WW modules
+  --revert            Revert all patched OK-WW modules to pristine upstream
+  --help              Show this help message
+EOF
+            exit 0
+            ;;
+        *)
+            PASS_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
 steam_discover_libs
-if ! steam_find_prefix; then
-    echo "Error: Prefix for App ID ${APP_ID} not found. Launch Wuthering Waves once in Steam first." >&2
-    exit 1
-fi
-
-# 2. Locate Steam Linux Runtime container entry point and Proton runner
-steam_find_entry_point || true
-if ! steam_find_proton; then
-    echo "Error: No usable Proton executable found." >&2
-    exit 1
-fi
-
-# 3. Flatpak detection
 steam_check_flatpak
 
-# 4. Resolve OK-WW targets; re-apply compat patches if the app is installed
-okww_find_app_dir
+if [ "${ACTION}" = "patcher" ]; then
+    okww_resolve_app_paths
+    exec python3 "${RESOURCE_DIR}/patch_wine_compat.py" "${WORKING_HOST}" "${PASS_ARGS[@]}"
+fi
+
+if ! steam_find_prefix "${EXPLICIT_PREFIX}"; then
+    echo "Error: Proton prefix for Wuthering Waves (${APP_ID}) not found." >&2
+    echo "Launch Wuthering Waves once in Steam before running ok-wuwa." >&2
+    exit 1
+fi
+
+steam_find_entry_point || true
+if ! steam_find_proton; then
+    echo "Error: No usable Proton executable found for prefix ${COMPAT_DATA_PATH}." >&2
+    exit 1
+fi
+
+if [ "${ACTION}" = "update" ]; then
+    echo "[*] Updating OK-WuWa installation..."
+    okww_bootstrap_or_update "${UPDATE_TAG}"
+    echo "[*] Update complete."
+    exit 0
+fi
+
+okww_resolve_app_paths
+if [ ! -f "${PYTHON_HOST}" ] || [ ! -f "${MAIN_PY_HOST}" ]; then
+    echo "[*] First-run setup: bootstrapping OK-WW into ${APP_ROOT}..."
+    okww_bootstrap_or_update ""
+fi
+
 okww_apply_patches
-okww_read_app_json
+mkdir -p "${SHARE_DIR}/run"
 
-if [ "$1" = "--launcher" ]; then
-    okww_resolve_targets --launcher
-    shift
-else
-    okww_resolve_targets ""
+if okww_is_app_running_in_prefix; then
+    echo "OK-WuWa is already running for prefix ${COMPAT_DATA_PATH}." >&2
+    exit 0
 fi
 
-# 5. Detect WebView2 Runtime; the launcher needs the render-fix sidecar or
-#    Chromium never presents its first frame (blank white window).
-okww_detect_wv2 || true
-okww_get_render_fix_win
-okww_wv2_flags
-if [ -z "${RENDER_FIX_WIN}" ] && [ "${TARGET_EXE}" = "${LAUNCHER_WIN}" ]; then
-    echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
+# Case 1: Wuthering Waves (or its prefix wineserver) is already running -> attach directly!
+ATTACH_PID=""
+if okww_find_game_pid; then
+    ATTACH_PID="${GAME_PID}"
+elif okww_find_prefix_wineserver_pid; then
+    ATTACH_PID="${WS_PID}"
 fi
 
-export OKWW_PROTON="${PROTON_BIN}"
-export OKWW_TARGET="${TARGET_EXE}"
-export OKWW_PYTHON="${PYTHON_WIN}"
-export OKWW_FIX="${RENDER_FIX_WIN}"
-export OKWW_ARGS="${TARGET_ARG:+${TARGET_ARG} }$*"
-INNER="$(okww_build_inner_cmd)"
+if [ -n "${ATTACH_PID}" ]; then
+    echo "[*] Attaching OK-WuWa to running container (PID ${ATTACH_PID})..."
+    if okww_join_container_by_pid "${ATTACH_PID}" \
+        bash -c 'cd "$1" && shift && exec "$@"' _ \
+        "${WORKING_HOST}" "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" "${PASS_ARGS[@]}"; then
+        exit 0
+    fi
+    echo "Warning: Could not enter running game container; falling back to standalone container." >&2
+fi
 
-# 6. Host-side cursor watcher: KWin renders no cursor over cursor-less
-#    XWayland windows, so define the theme cursor on the ok-ww window.
-okww_start_cursor_fix
+# Case 2: Game is not running yet -> run standalone with automatic Steam container handoff
+HANDOFF_HOST="${SHARE_DIR}/run/handoff.$$.json"
+HANDOFF_WIN="$(okww_to_win_z "${HANDOFF_HOST}")"
+rm -f "${HANDOFF_HOST}"
+trap 'rm -f "${HANDOFF_HOST}"' EXIT
 
-# 7. Execute OK-WuWa inside the Steam Linux Runtime container.
-okww_launch_app "$@"
+set +e
+OKWW_HANDOFF_FILE="${HANDOFF_WIN}" okww_run_in_fresh_container \
+    bash -c 'cd "$1" && shift && exec "$@"' _ \
+    "${WORKING_HOST}" "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" "${PASS_ARGS[@]}"
+RC=$?
+set -e
+
+if [ ! -f "${HANDOFF_HOST}" ]; then
+    exit "${RC}"
+fi
+
+# User clicked "Start Game" inside standalone OK-WW:
+# 1) Read handoff metadata and clean up standalone wineserver to avoid split-brain
+read -r STEAM_URI HANDOFF_TASK < <(python3 -c '
+import json, sys
+d = json.load(open(sys.argv[1], encoding="utf-8"))
+print(d.get("url") or "steam://rungameid/3513350", d.get("task") or "")
+' "${HANDOFF_HOST}" 2>/dev/null || echo "steam://rungameid/${APP_ID} ")
+rm -f "${HANDOFF_HOST}"
+
+for _ in $(seq 1 10); do
+    okww_find_prefix_wineserver_pid || break
+    sleep 0.3
+done
+if okww_find_prefix_wineserver_pid; then
+    WINE_SERVER_BIN="$(dirname "${PROTON_BIN}")/files/bin/wineserver"
+    [ ! -x "${WINE_SERVER_BIN}" ] && WINE_SERVER_BIN="$(dirname "${PROTON_BIN}")/dist/bin/wineserver"
+    if [ -x "${WINE_SERVER_BIN}" ]; then
+        okww_join_container_by_pid "${WS_PID}" env WINEPREFIX="${PFX_PATH}" "${WINE_SERVER_BIN}" -k >/dev/null 2>&1 || true
+        sleep 1
+    fi
+fi
+
+# 2) Launch Wuthering Waves through Steam (anti-cheat safe) and attach once running
+echo "[*] Launching Wuthering Waves via Steam (${STEAM_URI})..."
+okww_trigger_steam_game "${STEAM_URI}"
+
+echo "[*] Waiting for Wuthering Waves container to start..."
+FOUND_GAME=false
+for _ in $(seq 1 180); do
+    if okww_find_game_pid; then
+        FOUND_GAME=true
+        break
+    fi
+    sleep 1
+done
+
+if [ "${FOUND_GAME}" = false ]; then
+    echo "Error: Timed out waiting for Wuthering Waves to launch." >&2
+    exit 1
+fi
+
+# Give optional steam-wrapper.sh a brief window so we never spawn duplicate instances
+sleep 2
+if okww_is_app_running_in_prefix; then
+    echo "[*] Companion wrapper already started OK-WuWa inside the game container."
+    exit 0
+fi
+
+RESUME_ARGS=("${PASS_ARGS[@]}")
+if [ -n "${HANDOFF_TASK}" ]; then
+    RESUME_ARGS+=("-t" "${HANDOFF_TASK}")
+fi
+
+echo "[*] Attaching OK-WuWa into Wuthering Waves container (PID ${GAME_PID})..."
+OKWW_AUTO_START=1 okww_join_container_by_pid "${GAME_PID}" \
+    bash -c 'cd "$1" && shift && exec "$@"' _ \
+    "${WORKING_HOST}" "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" "${RESUME_ARGS[@]}"

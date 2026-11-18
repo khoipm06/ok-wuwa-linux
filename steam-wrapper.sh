@@ -1,74 +1,56 @@
 #!/usr/bin/env bash
-# Steam Launch Option Companion for OK-WuWa
-# Usage (Steam -> Wuthering Waves -> Properties -> Launch Options):
+# steam-wrapper.sh - Optional 1-Click Steam Launch Option Companion for OK-WuWa
+# Usage in Steam -> Wuthering Waves -> Properties -> Launch Options:
 #   ~/.local/share/ok-wuwa/steam-wrapper.sh %command%
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source shared helpers (from this checkout, or the installed share dir)
 if [ -f "${SCRIPT_DIR}/common.sh" ]; then
     source "${SCRIPT_DIR}/common.sh"
 elif [ -f "${HOME}/.local/share/ok-wuwa/common.sh" ]; then
     source "${HOME}/.local/share/ok-wuwa/common.sh"
 else
-    echo "Error: common.sh not found. Run setup.sh first." >&2
-    exit 1
+    exec "$@"
 fi
 
-okww_find_resource_dir "${SCRIPT_DIR}"
+okww_find_resource_dir "${SCRIPT_DIR}" || true
 steam_discover_libs
+steam_check_flatpak
 
-# Steam provides STEAM_COMPAT_DATA_PATH; fall back to library scan when the
-# wrapper is invoked manually (e.g. testing) without Steam's environment.
 if ! steam_find_prefix; then
     exec "$@"
 fi
 
-okww_find_app_dir
-okww_apply_patches
-okww_resolve_targets ""
-
-# Manual invocation only: overwriting Steam's per-game env would break
-# the attached game's prefix.
+# Preserve Steam's per-game environment when invoked from Steam; only export
+# fallback values when testing the wrapper manually outside Steam.
 if [ -z "${STEAM_COMPAT_DATA_PATH:-}" ]; then
-    steam_check_flatpak
     export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
+fi
+if [ -z "${STEAM_COMPAT_CLIENT_INSTALL_PATH:-}" ]; then
     export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
 fi
 
-# Detect installed WebView2 Runtime path
-okww_detect_wv2 || true
-okww_get_render_fix_win
-okww_wv2_flags
-if [ -z "${RENDER_FIX_WIN}" ] && [ "${TARGET_EXE}" = "${LAUNCHER_WIN}" ]; then
-    echo "Warning: WebView2 render-fix helper not installed; run setup.sh." >&2
-fi
-
-# Proton runner: prefer Steam's tool paths, then compatibilitytools.d scan.
 steam_find_proton || true
+okww_resolve_app_paths
+okww_apply_patches
 
-export OKWW_PROTON="${PROTON_BIN}"
-export OKWW_TARGET="${TARGET_EXE}"
-export OKWW_PYTHON="${PYTHON_WIN}"
-export OKWW_FIX="${RENDER_FIX_WIN}"
-export OKWW_ARGS="${TARGET_ARG}"
-INNER="$(okww_build_inner_cmd)"
-
-# Host-side cursor watcher: KWin renders no cursor over cursor-less XWayland
-# windows; define the theme cursor on the ok-ww window when it appears.
-okww_start_cursor_fix
-
-# 7. Launch OK-WuWa alongside the game. Both processes must share one wineserver
-#    and the Steam client pipe, so the companion runs through the same
-#    entry point with the python entry (WebView2 does not survive nesting).
-#    If no Proton runner is resolvable, skip silently - the game still launches.
-if [ -n "${PROTON_BIN}" ] && { [ -f "${APP_DIR}/data/apps/ok-ww/python/python.exe" ] && [ -f "${APP_DIR}/data/apps/ok-ww/working/main.py" ]; }; then
+# Steam runs Launch Options inside the game's pressure-vessel container, so
+# launching via `proton runinprefix` directly shares the game's /tmp and
+# wineserver automatically. Delay until Client-Win64-Shipping.exe exists so
+# the game's initial `proton waitforexitandrun` (`wineserver -w`) never blocks.
+if [ -n "${PROTON_BIN:-}" ] && [ -f "${PYTHON_HOST}" ] && [ -f "${MAIN_PY_HOST}" ]; then
     (
-        export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_CLIENT_PATH}"
-        export STEAM_COMPAT_DATA_PATH="${COMPAT_DATA_PATH}"
-        "${ENTRY_POINT}" --verb=runinprefix -- "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" >/dev/null 2>&1 &
+        for _ in $(seq 1 180); do
+            pgrep -f "Client-Win64-Shipping\.exe" >/dev/null 2>&1 && break
+            sleep 1
+        done
+        if pgrep -f "Client-Win64-Shipping\.exe" >/dev/null 2>&1 && ! okww_is_app_running_in_prefix; then
+            cd "${WORKING_HOST}" || exit 0
+            export PYTHONIOENCODING=utf-8
+            "${PROTON_BIN}" runinprefix "${PYTHON_WIN}" "${MAIN_PY_WIN}" >/dev/null 2>&1 &
+        fi
     ) &
 fi
 
