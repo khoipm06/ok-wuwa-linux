@@ -10,7 +10,7 @@ Run [ok-wuthering-waves](https://github.com/ok-oldking/ok-wuthering-waves) seaml
   - **OK-WuWa started first**: Clicking **Start Wuthering Waves** inside OK-WW cleanly closes the temporary pre-game container, launches the game safely through Steam (`steam://rungameid/3513350`), and automatically re-attaches inside the game's container once it starts.
   - **Optional 1-Click Companion**: `steam-wrapper.sh %command%` starts OK-WuWa automatically whenever you launch Wuthering Waves from Steam.
 - **Exact Proton Matching**: Reads `compatdata/<appid>/config_info` to select the exact Proton runner (`DW-Proton`, `Proton-CachyOS`, `GE-Proton`, `Proton Experimental`, etc.) used by the game, preventing `wineserver` protocol mismatches.
-- **Self-Healing Idempotent Patcher**: Rebuilds patched modules from the local bare git repository (`~/.local/share/ok-wuwa/app/data/apps/ok-ww/repo`), validates AST syntax, and installs a `sitecustomize.py` hook so in-app updates via the **About** tab automatically re-apply Wine compatibility fixes on restart.
+- **Version-Agnostic Win32 Runtime Shim (Zero Upstream File Edits)**: Instead of brittle text-replacement patches on upstream `.py` files (which break whenever upstream renames or refactors modules), `patch_wine_compat.py` installs an in-memory Win32/Python runtime shim (`sitecustomize.py`) inside the bundled Python environment. The entire OK-WW `working/` checkout stays **100% unmodified upstream**, so future updates (`v3.9`, `v4.0`, new characters, new tasks, UI refactors) work out-of-the-box without needing manual re-porting.
 
 ## Prerequisites
 
@@ -56,36 +56,29 @@ To launch OK-WuWa automatically every time Wuthering Waves starts from Steam:
    ~/.local/share/ok-wuwa/steam-wrapper.sh %command%
    ```
 
-## Patch Management
+## Runtime Compatibility Layer
+
+`patch_wine_compat.py` keeps `working/` 100% untouched on disk and hooks stable OS / Win32 / Python API boundaries in memory whenever `python.exe` starts under Wine (`ntdll.wine_get_version`):
+
+| Boundary / Hook | Fix Applied |
+| --- | --- |
+| `sys.getwindowsversion` / `platform.version` | Reports Windows 10 `10.0.19045`, automatically disabling unimplemented Windows 11 DWM Mica/Acrylic glass backdrops and broken WinRT `Windows.Graphics.Capture` across any current or future UI toolkit. |
+| `user32.RegisterHotKey` & `PeekMessageW` | Virtualizes background-thread Win32 hotkey loops via `GetAsyncKeyState` so Wine never creates a deadlocking X11 thread input queue, keeping `F9–F12` and `Ctrl+Alt+D/S` hotkeys working regardless of which UI module registers them. |
+| `win32gui.PostMessage` | Suppresses Wine focus-stealing `WM_ACTIVATE` spam and enforces a `>= 40ms` hold between `DOWN` and `UP` messages so DXVK/UE4 frame ticks never drop fast taps. |
+| `gettext.translation` | Retries missing `.mo` locale lookups with `fallback=True` so locales like `en_US` never raise `FileNotFoundError`. |
+| `os.startfile` & `subprocess` | Coordinates anti-cheat-safe pre-game `steam://rungameid/3513350` container handoff and silences missing Windows `nvidia-smi.exe` probes. |
+| `sys.meta_path` non-invasive import hooks | Enables background `BitBlt` capture without requiring foreground focus (`OKWW_REQUIRE_FOREGROUND=1` to opt out), guards `BitBlt` against closed `HWND`s, and bypasses unimplemented `Shell.Application` COM loops. |
 
 ```bash
-# Inspect patch status
+# Inspect runtime layer status
 ok-wuwa --status
 
-# Validate Python AST across all patched modules
+# Verify runtime shim AST & installation
 ok-wuwa --verify
 
-# Restore all modules to pristine upstream source
+# Remove runtime shim completely
 ok-wuwa --revert
 ```
-
-You can also invoke `patch_wine_compat.py` directly (`python3 patch_wine_compat.py --status`, `--offline`, `--revert`).
-
-## What Gets Patched (and Why)
-
-Every patch applied by `patch_wine_compat.py` is scoped behind `is_wine()` (`ntdll.wine_get_version`):
-
-| Target Module | Fix Applied |
-| --- | --- |
-| `ok/ui/qt/kit/theme.py` | Disables unimplemented Windows 11 DWM Mica/Acrylic glass backdrops on Wine (`build >= 22000`) for crisp solid rendering. |
-| `ok/ui/qt/shell/run_bar.py` | Replaces background-thread `PeekMessageW` + `RegisterHotKey` (which deadlocks Wine's X11 thread input queue) with a GUI-thread `QTimer` + `GetAsyncKeyState` poller so `F9–F12` hotkeys work safely. |
-| `ok/ui/qt/debug/diagnosis_page.py` | Same deadlock-free `GetAsyncKeyState` replacement for `Ctrl+Alt+D` / `Ctrl+Alt+S` diagnostic hotkeys. |
-| `ok/util/window.py` | Skips unavailable WinRT `Windows.Graphics.Capture` probing and treats visible non-minimized Wine windows as capturable so `BitBlt` + `PostMessage` automation runs in the background without requiring foreground focus. |
-| `ok/device/interaction_methods/post_message.py` | Skips `WM_ACTIVATE` spam on Wine (preventing Wine from stealing desktop focus on every click/move) and enforces a minimum `40ms` key/button hold so DXVK/UE4 frame ticks never drop fast inputs. |
-| `ok/device/capture_methods/bitblt_utils.py` | Guards `capture_by_bitblt` with `IsWindow(hwnd)` before `GetWindowDC`/`BitBlt` to avoid errors on transient popups. |
-| `ok/core/translation.py` | Enables `fallback=True` in `gettext.translation` so locales without compiled `.mo` files (such as `en_US`) do not raise `FileNotFoundError`. |
-| `ok/util/explorer.py` | Opens folders directly via `os.startfile(..., 'explore')` instead of unimplemented `Shell.Application` COM window enumeration. |
-| `ok/util/process.py` & `config.py` & `ok/__init__.py` | Skips Windows `nvidia-smi.exe` probing, launches Wuthering Waves safely via `steam://rungameid/3513350`, and coordinates pre-game standalone container handoff. |
 
 ## Repository Structure
 
@@ -93,7 +86,7 @@ Every patch applied by `patch_wine_compat.py` is scoped behind `is_wine()` (`ntd
 - `common.sh` — Shared Steam library, `config_info` Proton runner, Btrfs mount alias, and container-join routines.
 - `ok-wuwa` — Universal launcher, container handoff supervisor, and CLI updater.
 - `steam-wrapper.sh` — Optional companion wrapper for Steam Launch Options.
-- `patch_wine_compat.py` — Offline-first quilt-style AST-validated Wine compatibility patcher + `sitecustomize.py` auto-repatch hook.
+- `patch_wine_compat.py` — Version-agnostic in-memory Win32/Python runtime shim (`sitecustomize.py`) with zero edits to upstream OK-WW files.
 
 ## License
 
