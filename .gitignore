@@ -3,3 +3,7 @@ __pycache__/
 logs/
 cache/
 configs/
+ok_tasks/
+screenshots/
+.agents/
+.omo/
